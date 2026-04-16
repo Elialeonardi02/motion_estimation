@@ -3,7 +3,8 @@ CXX := g++
 CXXFLAGS := -std=c++17 -Wall -Wextra -O2
 INCLUDE_DIRS := -Icommon/include \
                 -Isolutions/full_search/include \
-                -Isolutions/full_search/implementations/cpu_naive
+                -Isolutions/full_search/implementations/cpu_naive \
+                -Isolutions/full_search/implementations/cuda_naive
 
 # Directory structure
 COMMON_SRC := common/src
@@ -25,14 +26,18 @@ FSEARCH_SOURCES := $(FSEARCH_SRC)/src/fullSearchBM.cpp
 
 FSEARCH_CPU_SOURCES := $(FSEARCH_CPU_SRC)/fullSearchBM_cpu_naive.cpp
 
-ALL_SOURCES := $(COMMON_SOURCES) $(FSEARCH_SOURCES) $(FSEARCH_CPU_SOURCES)
+FSEARCH_CUDA_SRC := solutions/full_search/implementations/cuda_naive
+FSEARCH_CUDA_SOURCES := $(FSEARCH_CUDA_SRC)/FullSearchBM_cuda_naive.cpp
+
+ALL_SOURCES := $(COMMON_SOURCES) $(FSEARCH_SOURCES) $(FSEARCH_CPU_SOURCES) $(FSEARCH_CUDA_SOURCES)
 
 # Object files
 COMMON_OBJECTS := $(COMMON_SOURCES:$(COMMON_SRC)/%.cpp=$(COMMON_BUILD)/%.o)
 FSEARCH_OBJECTS := $(FSEARCH_SOURCES:$(FSEARCH_SRC)/src/%.cpp=$(FSEARCH_BUILD)/%.o)
 FSEARCH_CPU_OBJECTS := $(FSEARCH_CPU_SOURCES:$(FSEARCH_CPU_SRC)/%.cpp=$(FSEARCH_BUILD)/%.o)
+FSEARCH_CUDA_OBJECTS := $(FSEARCH_CUDA_SOURCES:$(FSEARCH_CUDA_SRC)/%.cpp=$(FSEARCH_BUILD)/%.o)
 
-ALL_OBJECTS := $(COMMON_OBJECTS) $(FSEARCH_OBJECTS) $(FSEARCH_CPU_OBJECTS)
+ALL_OBJECTS := $(COMMON_OBJECTS) $(FSEARCH_OBJECTS) $(FSEARCH_CPU_OBJECTS) $(FSEARCH_CUDA_OBJECTS)
 
 # Executable name
 EXECUTABLE := block_matching
@@ -54,6 +59,10 @@ $(FSEARCH_BUILD)/fullSearchBM.o: $(FSEARCH_SRC)/src/fullSearchBM.cpp | $(FSEARCH
 
 # Compile full search CPU naive implementation files
 $(FSEARCH_BUILD)/fullSearchBM_cpu_naive.o: $(FSEARCH_CPU_SRC)/fullSearchBM_cpu_naive.cpp | $(FSEARCH_BUILD)
+	$(CXX) $(CXXFLAGS) $(INCLUDE_DIRS) -c $< -o $@
+
+# Compile full search CUDA naive implementation files
+$(FSEARCH_BUILD)/FullSearchBM_cuda_naive.o: $(FSEARCH_CUDA_SRC)/FullSearchBM_cuda_naive.cpp | $(FSEARCH_BUILD)
 	$(CXX) $(CXXFLAGS) $(INCLUDE_DIRS) -c $< -o $@
 
 # Link executable
