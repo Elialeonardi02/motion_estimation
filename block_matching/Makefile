@@ -1,78 +1,86 @@
-# Makefile for Block Matching project
-CXX := g++
-CXXFLAGS := -std=c++17 -Wall -Wextra -O2
-INCLUDE_DIRS := -Icommon/include \
-                -Isolutions/full_search/include \
-                -Isolutions/full_search/implementations/cpu_naive \
-                -Isolutions/full_search/implementations/cuda_naive
+# Author: Gabriele Mencagli
+# Modified for block matching with CUDA support
+
+NVXX            = nvcc
+NVXXFLAGS       = -std=c++17 -x cu -Xcompiler -fPIE
+NVOPTFLAGS      = -w -O3 --gpu-architecture=compute_80 --gpu-code=sm_80
+
+CXXFLAGS        = -std=c++17 -Wall -Wextra -O2 -fPIE -fpic
+
+INCLUDE_DIRS    = -Icommon/include \
+                  -Isolutions/full_search/include \
+                  -Isolutions/full_search/implementations/cpu_naive \
+                  -Isolutions/full_search/implementations/cuda_naive
 
 # Directory structure
-COMMON_SRC := common/src
-COMMON_BUILD := build/common
-FSEARCH_SRC := solutions/full_search
-FSEARCH_CPU_SRC := solutions/full_search/implementations/cpu_naive
-FSEARCH_BUILD := build/full_search
-BUILD_DIR := build
-OUTPUT_DIR := output
-
-# Source files
-COMMON_SOURCES := $(COMMON_SRC)/main.cpp \
-                  $(COMMON_SRC)/imageIO.cpp \
-                  $(COMMON_SRC)/visualization.cpp \
-                  $(COMMON_SRC)/utils.cpp \
-                  $(COMMON_SRC)/blockMatchingFactory.cpp
-
-FSEARCH_SOURCES := $(FSEARCH_SRC)/src/fullSearchBM.cpp
-
-FSEARCH_CPU_SOURCES := $(FSEARCH_CPU_SRC)/fullSearchBM_cpu_naive.cpp
-
-FSEARCH_CUDA_SRC := solutions/full_search/implementations/cuda_naive
-FSEARCH_CUDA_SOURCES := $(FSEARCH_CUDA_SRC)/FullSearchBM_cuda_naive.cpp
-
-ALL_SOURCES := $(COMMON_SOURCES) $(FSEARCH_SOURCES) $(FSEARCH_CPU_SOURCES) $(FSEARCH_CUDA_SOURCES)
-
-# Object files
-COMMON_OBJECTS := $(COMMON_SOURCES:$(COMMON_SRC)/%.cpp=$(COMMON_BUILD)/%.o)
-FSEARCH_OBJECTS := $(FSEARCH_SOURCES:$(FSEARCH_SRC)/src/%.cpp=$(FSEARCH_BUILD)/%.o)
-FSEARCH_CPU_OBJECTS := $(FSEARCH_CPU_SOURCES:$(FSEARCH_CPU_SRC)/%.cpp=$(FSEARCH_BUILD)/%.o)
-FSEARCH_CUDA_OBJECTS := $(FSEARCH_CUDA_SOURCES:$(FSEARCH_CUDA_SRC)/%.cpp=$(FSEARCH_BUILD)/%.o)
-
-ALL_OBJECTS := $(COMMON_OBJECTS) $(FSEARCH_OBJECTS) $(FSEARCH_CPU_OBJECTS) $(FSEARCH_CUDA_OBJECTS)
+COMMON_SRC      = common/src
+FSEARCH_SRC     = solutions/full_search
+FSEARCH_CPU_SRC = solutions/full_search/implementations/cpu_naive
+FSEARCH_CUDA_SRC = solutions/full_search/implementations/cuda_naive
+BUILD_DIR       = build
+OUTPUT_DIR      = output
 
 # Executable name
-EXECUTABLE := block_matching
+EXECUTABLE      = block_matching
+
+# Object files
+COMMON_OBJECTS  = $(BUILD_DIR)/main.o \
+                  $(BUILD_DIR)/imageIO.o \
+                  $(BUILD_DIR)/visualization.o \
+                  $(BUILD_DIR)/utils.o \
+                  $(BUILD_DIR)/blockMatchingFactory.o
+
+FSEARCH_OBJECTS = $(BUILD_DIR)/fullSearchBM.o \
+                  $(BUILD_DIR)/fullSearchBM_cpu_naive.o
+
+FSEARCH_CUDA_OBJECTS = $(BUILD_DIR)/FullSearchBM_cuda_naive.o
+
+ALL_OBJECTS = $(COMMON_OBJECTS) $(FSEARCH_OBJECTS) $(FSEARCH_CUDA_OBJECTS)
 
 # Default target
 all: $(EXECUTABLE)
 
-# Create build directories
-$(COMMON_BUILD) $(FSEARCH_BUILD):
+# Create build directory
+$(BUILD_DIR):
 	@mkdir -p $@
 
-# Compile common object files
-$(COMMON_BUILD)/%.o: $(COMMON_SRC)/%.cpp | $(COMMON_BUILD)
-	$(CXX) $(CXXFLAGS) $(INCLUDE_DIRS) -c $< -o $@
+# Compile common object files with g++
+$(BUILD_DIR)/main.o: $(COMMON_SRC)/main.cpp | $(BUILD_DIR)
+	g++ $(CXXFLAGS) $(INCLUDE_DIRS) -c $< -o $@
 
-# Compile full search source files
-$(FSEARCH_BUILD)/fullSearchBM.o: $(FSEARCH_SRC)/src/fullSearchBM.cpp | $(FSEARCH_BUILD)
-	$(CXX) $(CXXFLAGS) $(INCLUDE_DIRS) -c $< -o $@
+$(BUILD_DIR)/imageIO.o: $(COMMON_SRC)/imageIO.cpp | $(BUILD_DIR)
+	g++ $(CXXFLAGS) $(INCLUDE_DIRS) -c $< -o $@
 
-# Compile full search CPU naive implementation files
-$(FSEARCH_BUILD)/fullSearchBM_cpu_naive.o: $(FSEARCH_CPU_SRC)/fullSearchBM_cpu_naive.cpp | $(FSEARCH_BUILD)
-	$(CXX) $(CXXFLAGS) $(INCLUDE_DIRS) -c $< -o $@
+$(BUILD_DIR)/visualization.o: $(COMMON_SRC)/visualization.cpp | $(BUILD_DIR)
+	g++ $(CXXFLAGS) $(INCLUDE_DIRS) -c $< -o $@
 
-# Compile full search CUDA naive implementation files
-$(FSEARCH_BUILD)/FullSearchBM_cuda_naive.o: $(FSEARCH_CUDA_SRC)/FullSearchBM_cuda_naive.cpp | $(FSEARCH_BUILD)
-	$(CXX) $(CXXFLAGS) $(INCLUDE_DIRS) -c $< -o $@
+$(BUILD_DIR)/utils.o: $(COMMON_SRC)/utils.cpp | $(BUILD_DIR)
+	g++ $(CXXFLAGS) $(INCLUDE_DIRS) -c $< -o $@
 
-# Link executable
+$(BUILD_DIR)/blockMatchingFactory.o: $(COMMON_SRC)/blockMatchingFactory.cpp | $(BUILD_DIR)
+	g++ $(CXXFLAGS) $(INCLUDE_DIRS) -c $< -o $@
+
+# Compile fullSearchBM.cpp with g++
+$(BUILD_DIR)/fullSearchBM.o: $(FSEARCH_SRC)/src/fullSearchBM.cpp | $(BUILD_DIR)
+	g++ $(CXXFLAGS) $(INCLUDE_DIRS) -c $< -o $@
+
+# Compile fullSearchBM_cpu_naive.cpp with g++
+$(BUILD_DIR)/fullSearchBM_cpu_naive.o: $(FSEARCH_CPU_SRC)/fullSearchBM_cpu_naive.cpp | $(BUILD_DIR)
+	g++ $(CXXFLAGS) $(INCLUDE_DIRS) -c $< -o $@
+
+# Compile FullSearchBM_cuda_naive.cpp with nvcc
+$(BUILD_DIR)/FullSearchBM_cuda_naive.o: $(FSEARCH_CUDA_SRC)/FullSearchBM_cuda_naive.cpp | $(BUILD_DIR)
+	$(NVXX) $(NVXXFLAGS) $(NVOPTFLAGS) $(INCLUDE_DIRS) $< -c -o $@
+
+# Link executable with nvcc
 $(EXECUTABLE): $(ALL_OBJECTS)
-	$(CXX) $(CXXFLAGS) -o $@ $^
+	$(NVXX) -Xcompiler -fPIE $(ALL_OBJECTS) -o $@
 	@echo "Build complete! Executable: $(EXECUTABLE)"
 
 # Clean build artifacts
 clean:
-	@rm -rf $(BUILD_DIR) $(EXECUTABLE)
+	@rm -f $(EXECUTABLE)
+	@rm -rf $(BUILD_DIR)
 	@echo "Clean complete!"
 
 # Clean everything including output
@@ -80,8 +88,5 @@ clean-all: clean
 	@rm -rf $(OUTPUT_DIR)
 	@echo "All cleaned!"
 
-# Run the program (requires arguments)
-run: $(EXECUTABLE)
-	@./$(EXECUTABLE)
-
-.PHONY: all clean clean-all run
+.DEFAULT_GOAL := all
+.PHONY: all clean clean-all

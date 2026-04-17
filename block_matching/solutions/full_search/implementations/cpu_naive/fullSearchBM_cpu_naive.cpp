@@ -1,6 +1,8 @@
 #include "fullSearchBM_cpu_naive.h"
 #include <cmath>
 #include <limits>
+#include <iostream>
+#include <chrono>
 
 using namespace std;
 
@@ -34,11 +36,14 @@ int computeSADRGB(const ImageColor& curr, const ImageColor& ref,
 
 // Full Search Block Matching (FSBM) for grayscale images
 vector<vector<MotionVector>> fullSearchCPUNaiveGray(const ImageGray& curr, const ImageGray& ref,
-                                                     int blockSize, int searchRange) {
+                                                     int blockSize) {
     // Grid of blocks: blocksX = ⌊width / blockSize⌋, blocksY = ⌊height / blockSize⌋
     int blocksX = curr.width / blockSize;
     int blocksY = curr.height / blockSize;
     vector<vector<MotionVector>> mv(blocksY, vector<MotionVector>(blocksX));
+
+    auto start_time = chrono::high_resolution_clock::now();
+    cout << "CPU Naive (Grayscale): Processing " << blocksX << "x" << blocksY << " = " << (blocksX * blocksY) << " blocks" << endl;
 
     for(int by = 0; by < blocksY; by++) {
         for(int bx = 0; bx < blocksX; bx++) {
@@ -60,17 +65,32 @@ vector<vector<MotionVector>> fullSearchCPUNaiveGray(const ImageGray& curr, const
             }
             mv[by][bx] = bestMV;
         }
+        // Print progress every 10 rows processed
+        if((by + 1) % 10 == 0 || by == blocksY - 1) {
+            auto current_time = chrono::high_resolution_clock::now();
+            chrono::duration<double> elapsed = current_time - start_time;
+            int processed = (by + 1) * blocksX;
+            int total = blocksX * blocksY;
+            double percentage = (100.0 * processed) / total;
+            cout << "  Progress: " << processed << "/" << total << " blocks (" << percentage << "%) - " << elapsed.count() << " s" << endl;
+        }
     }
+    auto end_time = chrono::high_resolution_clock::now();
+    chrono::duration<double> total_time = end_time - start_time;
+    cout << "CPU Naive (Grayscale): Total processing time: " << total_time.count() << " s" << endl;
     return mv;
 }
-
-// Full Search Block Matching (FSBM) for RGB color images
-vector<vector<MotionVector>> fullSearchCPUNaiveRGB(const ImageColor& curr, const ImageColor& ref,
-                                                    int blockSize, int searchRange) {
+vector<vector<MotionVector>> fullSearchCPUNaiveRGB(const Ima
+    
+    geColor& curr, const ImageColor& ref,
+                                                    int blockSize) {
     // Grid of blocks: blocksX = ⌊width / blockSize⌋, blocksY = ⌊height / blockSize⌋
     int blocksX = curr.width / blockSize;
     int blocksY = curr.height / blockSize;
     vector<vector<MotionVector>> mv(blocksY, vector<MotionVector>(blocksX));
+
+    auto start_time = chrono::high_resolution_clock::now();
+    cout << "CPU Naive (RGB): Processing " << blocksX << "x" << blocksY << " = " << (blocksX * blocksY) << " blocks" << endl;
 
     for(int by = 0; by < blocksY; by++) {
         for(int bx = 0; bx < blocksX; bx++) {
@@ -92,6 +112,18 @@ vector<vector<MotionVector>> fullSearchCPUNaiveRGB(const ImageColor& curr, const
             }
             mv[by][bx] = bestMV;
         }
+        // Print progress every 10 rows processed
+        if((by + 1) % 10 == 0 || by == blocksY - 1) {
+            auto current_time = chrono::high_resolution_clock::now();
+            chrono::duration<double> elapsed = current_time - start_time;
+            int processed = (by + 1) * blocksX;
+            int total = blocksX * blocksY;
+            double percentage = (100.0 * processed) / total;
+            cout << "  Progress: " << processed << "/" << total << " blocks (" << percentage << "%) - " << elapsed.count() << " s" << endl;
+        }
     }
+    auto end_time = chrono::high_resolution_clock::now();
+    chrono::duration<double> total_time = end_time - start_time;
+    cout << "CPU Naive (RGB): Total processing time: " << total_time.count() << " s" << endl;
     return mv;
 }

@@ -2,10 +2,8 @@
 #define FULLSEARCHBM_CUDA_NAIVE_H
 
 #include <vector>
+#include <cuda_runtime.h>
 #include "types.h"
-
-// CUDA error type forward declaration
-typedef int cudaError_t;
 
 // CUDA error checking function
 void gpuErrorCheck(cudaError_t error);

@@ -18,6 +18,8 @@ int main(int argc, char* argv[]) {
     string format = "pgm";
     int width = 0, height = 0;
     bool isColor = false;
+    int blockSize = 32;
+
     
     // Block matching algorithm and implementation selection
     string algorithm = "full_search";
@@ -89,6 +91,13 @@ int main(int argc, char* argv[]) {
             }
         } else if(arg == "--color") {
             isColor = true;
+        } else if(arg == "--block-size") {
+            if(i + 1 < argc) {
+                blockSize = atoi(argv[++i]);
+            } else {
+                cerr << "Error: --block-size requires a numeric value" << endl;
+                return 1;
+            }
         } else {
             image_paths.push_back(arg);
         }
@@ -114,11 +123,13 @@ int main(int argc, char* argv[]) {
              << " [--algorithm <algorithm>] [--implementation <impl>]"
              << " [--input-dir <dir>] [--range <prefix> <suffix> <start> <end>]"
              << " [--format pgm|ppm|raw] [--width W] [--height H] [--color]"
+             << " [--block-size <size>]"
              << " <image1> <image2> ..." << endl;
         cerr << "At least two images are required for motion estimation." << endl;
         cerr << "For RAW format, specify --width and --height. Use --color to specify RGB images (default is grayscale)." << endl;
         cerr << "Available algorithms: full_search" << endl;
-        cerr << "Available implementations: cpu_naive" << endl;
+        cerr << "Available implementations: cpu_naive, cuda_naive" << endl;
+        cerr << "Default block size: 32 (full frame search)" << endl;
         return 1;
     }
 
@@ -163,6 +174,8 @@ int main(int argc, char* argv[]) {
     cout << "Block Matching Configuration:" << endl;
     cout << "  Algorithm: " << algorithm << endl;
     cout << "  Implementation: " << implementation << endl;
+    cout << "  Block size: " << blockSize << endl;
+    cout << "  Search mode: Full frame (naive)" << endl;
     cout << "  Output directory: " << output_dir << endl << endl;
 
     // Create block matcher
@@ -175,8 +188,6 @@ int main(int argc, char* argv[]) {
     }
 
     bool isRange = !range_prefix.empty();
-    const int blockSize = 16;
-    const int searchRange = 16;
 
     // Process consecutive image pairs
     for(size_t i = 0; i < image_paths.size() - 1; ++i) {
@@ -199,7 +210,7 @@ int main(int argc, char* argv[]) {
                 }
                 
                 chrono::high_resolution_clock::time_point start = chrono::high_resolution_clock::now();
-                vector<vector<MotionVector>> mv = matcher->matchRGB(curr_frame, ref_frame, blockSize, searchRange);
+                vector<vector<MotionVector>> mv = matcher->matchRGB(curr_frame, ref_frame, blockSize, 0);
                 chrono::high_resolution_clock::time_point end = chrono::high_resolution_clock::now();
                 chrono::duration<double> elapsed = end - start;
                 cout << "Matching time: " << elapsed.count() << " s" << endl;
@@ -228,7 +239,7 @@ int main(int argc, char* argv[]) {
                 }
 
                 chrono::high_resolution_clock::time_point start = chrono::high_resolution_clock::now();
-                vector<vector<MotionVector>> mv = matcher->matchGray(curr_frame, ref_frame, blockSize, searchRange);
+                vector<vector<MotionVector>> mv = matcher->matchGray(curr_frame, ref_frame, blockSize, 0);
                 chrono::high_resolution_clock::time_point end = chrono::high_resolution_clock::now();
                 chrono::duration<double> elapsed = end - start;
                 cout << "Matching time: " << elapsed.count() << " s" << endl;

@@ -3,22 +3,22 @@
 
 // Forward declarations from cpu_naive implementation
 std::vector<std::vector<MotionVector>> fullSearchCPUNaiveGray(const ImageGray& curr, const ImageGray& ref,
-                                                               int blockSize, int searchRange);
+                                                               int blockSize);
 std::vector<std::vector<MotionVector>> fullSearchCPUNaiveRGB(const ImageColor& curr, const ImageColor& ref,
-                                                              int blockSize, int searchRange);
+                                                              int blockSize);
 
 std::vector<std::vector<MotionVector>> FullSearchBlockMatcher::matchGray(
     const ImageGray& curr, 
     const ImageGray& ref,
-    int blockSize, 
-    int searchRange) {
-    return fullSearchCPUNaiveGray(curr, ref, blockSize, searchRange);
+    int blockSize,
+    int searchRange) {  // Not used in CPU naive - full search entire frame
+    return fullSearchCPUNaiveGray(curr, ref, blockSize);
 }
 
 std::vector<std::vector<MotionVector>> FullSearchBlockMatcher::matchRGB(
     const ImageColor& curr, 
     const ImageColor& ref,
-    int blockSize, 
-    int searchRange) {
-    return fullSearchCPUNaiveRGB(curr, ref, blockSize, searchRange);
+    int blockSize,
+    int searchRange) {  // Not used in CPU naive - full search entire frame
+    return fullSearchCPUNaiveRGB(curr, ref, blockSize);
 }
