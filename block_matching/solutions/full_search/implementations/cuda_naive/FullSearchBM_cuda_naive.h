@@ -5,8 +5,7 @@
 #include <cuda_runtime.h>
 #include "types.h"
 
-// CUDA error checking function
-void gpuErrorCheck(cudaError_t error);
+// ...existing code...
 
 // Full search block matching on GPU (naive CUDA implementation)
 // Computes motion vectors between current and reference frames
@@ -15,11 +14,10 @@ void gpuErrorCheck(cudaError_t error);
 // - curr: Current frame (ImageGray)
 // - ref: Reference frame (ImageGray)
 // - blockSize: Size of the block (blockSize x blockSize)
-// - searchRange: Search range for motion estimation
 //
 // Returns:
 // - 2D vector of MotionVector structures (height x width)
 std::vector<std::vector<MotionVector>> fullSearchCUDANaiveGray(const ImageGray& curr, const ImageGray& ref, 
-                                                                int blockSize, int searchRange);
+                                                                int blockSize);
 
 #endif // FULLSEARCHBM_CUDA_NAIVE_H

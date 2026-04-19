@@ -14,15 +14,13 @@ public:
     virtual std::vector<std::vector<MotionVector>> matchGray(
         const ImageGray& curr, 
         const ImageGray& ref,
-        int blockSize, 
-        int searchRange) = 0;
+        int blockSize) = 0;
     
     // Compute motion vectors for RGB color images
     virtual std::vector<std::vector<MotionVector>> matchRGB(
         const ImageColor& curr, 
         const ImageColor& ref,
-        int blockSize, 
-        int searchRange) = 0;
+        int blockSize) = 0;
 };
 
 // Factory function to create block matcher instances

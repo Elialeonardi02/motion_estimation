@@ -7,8 +7,7 @@
 std::vector<std::vector<MotionVector>> fullSearchCUDANaiveGray(
     const ImageGray& curr, 
     const ImageGray& ref,
-    int blockSize, 
-    int searchRange);
+    int blockSize);
 
 // Inline wrapper for CUDA implementation
 class FullSearchBlockMatcherCUDA : public BlockMatcher {
@@ -16,16 +15,14 @@ public:
     std::vector<std::vector<MotionVector>> matchGray(
         const ImageGray& curr, 
         const ImageGray& ref,
-        int blockSize, 
-        int searchRange) override {
-        return fullSearchCUDANaiveGray(curr, ref, blockSize, searchRange);
+        int blockSize) override {
+        return fullSearchCUDANaiveGray(curr, ref, blockSize);
     }
     
     std::vector<std::vector<MotionVector>> matchRGB(
-        const ImageColor& curr, 
-        const ImageColor& ref,
-        int blockSize, 
-        int searchRange) override {
+        const ImageColor&, 
+        const ImageColor&,
+        int) override {
         throw std::runtime_error("CUDA RGB implementation not yet implemented");
     }
 };

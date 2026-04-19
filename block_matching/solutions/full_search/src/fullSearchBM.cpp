@@ -10,15 +10,13 @@ std::vector<std::vector<MotionVector>> fullSearchCPUNaiveRGB(const ImageColor& c
 std::vector<std::vector<MotionVector>> FullSearchBlockMatcher::matchGray(
     const ImageGray& curr, 
     const ImageGray& ref,
-    int blockSize,
-    int searchRange) {  // Not used in CPU naive - full search entire frame
+    int blockSize) {
     return fullSearchCPUNaiveGray(curr, ref, blockSize);
 }
 
 std::vector<std::vector<MotionVector>> FullSearchBlockMatcher::matchRGB(
     const ImageColor& curr, 
     const ImageColor& ref,
-    int blockSize,
-    int searchRange) {  // Not used in CPU naive - full search entire frame
+    int blockSize) {
     return fullSearchCPUNaiveRGB(curr, ref, blockSize);
 }

@@ -210,7 +210,7 @@ int main(int argc, char* argv[]) {
                 }
                 
                 chrono::high_resolution_clock::time_point start = chrono::high_resolution_clock::now();
-                vector<vector<MotionVector>> mv = matcher->matchRGB(curr_frame, ref_frame, blockSize, 0);
+                vector<vector<MotionVector>> mv = matcher->matchRGB(curr_frame, ref_frame, blockSize);
                 chrono::high_resolution_clock::time_point end = chrono::high_resolution_clock::now();
                 chrono::duration<double> elapsed = end - start;
                 cout << "Matching time: " << elapsed.count() << " s" << endl;
@@ -239,7 +239,7 @@ int main(int argc, char* argv[]) {
                 }
 
                 chrono::high_resolution_clock::time_point start = chrono::high_resolution_clock::now();
-                vector<vector<MotionVector>> mv = matcher->matchGray(curr_frame, ref_frame, blockSize, 0);
+                vector<vector<MotionVector>> mv = matcher->matchGray(curr_frame, ref_frame, blockSize);
                 chrono::high_resolution_clock::time_point end = chrono::high_resolution_clock::now();
                 chrono::duration<double> elapsed = end - start;
                 cout << "Matching time: " << elapsed.count() << " s" << endl;

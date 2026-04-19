@@ -80,9 +80,7 @@ vector<vector<MotionVector>> fullSearchCPUNaiveGray(const ImageGray& curr, const
     cout << "CPU Naive (Grayscale): Total processing time: " << total_time.count() << " s" << endl;
     return mv;
 }
-vector<vector<MotionVector>> fullSearchCPUNaiveRGB(const Ima
-    
-    geColor& curr, const ImageColor& ref,
+vector<vector<MotionVector>> fullSearchCPUNaiveRGB(const ImageColor& curr, const ImageColor& ref,
                                                     int blockSize) {
     // Grid of blocks: blocksX = ⌊width / blockSize⌋, blocksY = ⌊height / blockSize⌋
     int blocksX = curr.width / blockSize;

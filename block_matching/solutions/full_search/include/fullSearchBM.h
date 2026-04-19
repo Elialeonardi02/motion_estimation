@@ -11,14 +11,12 @@ public:
     std::vector<std::vector<MotionVector>> matchGray(
         const ImageGray& curr, 
         const ImageGray& ref,
-        int blockSize, 
-        int searchRange) override;
+        int blockSize) override;
     
     std::vector<std::vector<MotionVector>> matchRGB(
         const ImageColor& curr, 
         const ImageColor& ref,
-        int blockSize, 
-        int searchRange) override;
+        int blockSize) override;
 };
 
 #endif // FULLSEARCH_BM_H
