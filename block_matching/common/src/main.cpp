@@ -128,7 +128,7 @@ int main(int argc, char* argv[]) {
         cerr << "At least two images are required for motion estimation." << endl;
         cerr << "For RAW format, specify --width and --height. Use --color to specify RGB images (default is grayscale)." << endl;
         cerr << "Available algorithms: full_search" << endl;
-        cerr << "Available implementations: cpu_naive, cuda_naive" << endl;
+        cerr << "Available implementations: cpu_naive, cuda_naive, cuda_optimized" << endl;
         cerr << "Default block size: 32 (full frame search)" << endl;
         return 1;
     }

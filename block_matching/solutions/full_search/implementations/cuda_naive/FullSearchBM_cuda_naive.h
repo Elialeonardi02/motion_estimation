@@ -5,7 +5,6 @@
 #include <cuda_runtime.h>
 #include "types.h"
 
-// ...existing code...
 
 // Full search block matching on GPU (naive CUDA implementation)
 // Computes motion vectors between current and reference frames

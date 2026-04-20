@@ -3,13 +3,18 @@
 #include <stdexcept>
 #include <iostream>
 
-// Forward declaration for CUDA implementation
+// Forward declarations for CUDA implementations
 std::vector<std::vector<MotionVector>> fullSearchCUDANaiveGray(
     const ImageGray& curr, 
     const ImageGray& ref,
     int blockSize);
 
-// Inline wrapper for CUDA implementation
+std::vector<std::vector<MotionVector>> fullSearchCUDAOptimizedGray(
+    const ImageGray& curr, 
+    const ImageGray& ref,
+    int blockSize);
+
+// Inline wrapper for CUDA Naive implementation
 class FullSearchBlockMatcherCUDA : public BlockMatcher {
 public:
     std::vector<std::vector<MotionVector>> matchGray(
@@ -17,6 +22,24 @@ public:
         const ImageGray& ref,
         int blockSize) override {
         return fullSearchCUDANaiveGray(curr, ref, blockSize);
+    }
+    
+    std::vector<std::vector<MotionVector>> matchRGB(
+        const ImageColor&, 
+        const ImageColor&,
+        int) override {
+        throw std::runtime_error("CUDA RGB implementation not yet implemented");
+    }
+};
+
+// Inline wrapper for CUDA Optimized implementation
+class FullSearchBlockMatcherCUDAOptimized : public BlockMatcher {
+public:
+    std::vector<std::vector<MotionVector>> matchGray(
+        const ImageGray& curr, 
+        const ImageGray& ref,
+        int blockSize) override {
+        return fullSearchCUDAOptimizedGray(curr, ref, blockSize);
     }
     
     std::vector<std::vector<MotionVector>> matchRGB(
@@ -36,6 +59,8 @@ std::unique_ptr<BlockMatcher> createBlockMatcher(
             return std::make_unique<FullSearchBlockMatcher>();
         } else if(implementation == "cuda_naive") {
             return std::make_unique<FullSearchBlockMatcherCUDA>();
+        } else if(implementation == "cuda_optimized") {
+            return std::make_unique<FullSearchBlockMatcherCUDAOptimized>();
         } else {
             throw std::runtime_error("Unknown implementation '" + implementation + "' for algorithm '" + algorithm + "'");
         }

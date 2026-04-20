@@ -4,13 +4,12 @@
 #include <cstring>
 #include <limits>
 #include <cuda_runtime.h>
-#include "FullSearchBM_cuda_naive.h"
+#include "FullSearchBM_cuda_optimized.h"
 #include "cuda_utils.h"
 
 using namespace std;
 
 // Device function to compute SAD between two blocks on GPU
-// is static to avoid conflict between different .cu files from different solution 
 static __device__ int computeSAD_device(const unsigned char* curr, const unsigned char* ref,
                                  int x1, int y1, int x2, int y2, int blockSize, int width) {
     int sad = 0;
@@ -25,8 +24,7 @@ static __device__ int computeSAD_device(const unsigned char* curr, const unsigne
 // All threads within grid block cooperate to search reference frame 
 __global__ void fullSearchKernel(const unsigned char* d_curr, const unsigned char* d_ref,
                                  MotionVector* d_mv, int blockSize,
-                                 int width, int height, int blocksX, int blocksY,
-                                 int* d_thread_sad, int* d_thread_dx, int* d_thread_dy, int threadsPerBlock) {
+                                 int width, int height, int blocksX, int blocksY, int threadsPerBlock) {
     // Grid block index (one per search block in current frame)
     int bx = blockIdx.x; // Block index in x direction (search block column)
     int by = blockIdx.y; // Block index in y direction (search block row)
@@ -77,21 +75,25 @@ __global__ void fullSearchKernel(const unsigned char* d_curr, const unsigned cha
     
     // Write thread result to global memory (each thread has its own location)
     int result_idx = (bx + by * blocksX ) * threadsPerBlock + tidx;
-    d_thread_sad[result_idx] = best_sad;
-    d_thread_dx[result_idx] = best_dx;
-    d_thread_dy[result_idx] = best_dy;
+    extern __shared__ int shared_block_thread_sad[] ; // Shared memory for thread SAD results (max 1024 threads per block)
+    extern __shared__ int shared_block_thread_dx[];  // Shared memory for thread dx results
+    extern __shared__ int shared_block_thread_dy[];  // Shared memory
+    shared_block_thread_sad[tidx] = best_sad;
+    shared_block_thread_dx[tidx] = best_dx;
+    shared_block_thread_dy[tidx] = best_dy;
     
+    __syncthreads(); // Ensure all threads have written their results to shared memory before thread (0,0) reads them
+
     // Only thread (0,0) finds the global best among all threads in this block, all other threads are idle at this point
     if (tidx == 0) {
         int global_best_sad = INT_MAX;
         int global_best_dx = 0, global_best_dy = 0;
         
         for (int i = 0; i < total_threads; i++) {
-            int idx = (bx + by * blocksX ) * threadsPerBlock + i; // index for thread i in this block 
-            if (d_thread_sad[idx] < global_best_sad) {
-                global_best_sad = d_thread_sad[idx];
-                global_best_dx = d_thread_dx[idx];
-                global_best_dy = d_thread_dy[idx];
+            if (shared_block_thread_sad[i] < global_best_sad) {
+                global_best_sad = shared_block_thread_sad[i];
+                global_best_dx = shared_block_thread_dx[i];
+                global_best_dy = shared_block_thread_dy[i];
             }
         }
         
@@ -100,8 +102,8 @@ __global__ void fullSearchKernel(const unsigned char* d_curr, const unsigned cha
 }
 
 
-vector<vector<MotionVector>> fullSearchCUDANaiveGray(const ImageGray& curr, const ImageGray& ref, 
-                                                     int blockSize) {
+vector<vector<MotionVector>> fullSearchCUDAOptimizedGray(const ImageGray& curr, const ImageGray& ref, 
+                                                         int blockSize) {
     cudaSetDevice(0);
     
     // Validate input: current and reference frames must have same dimensions
@@ -115,6 +117,7 @@ vector<vector<MotionVector>> fullSearchCUDANaiveGray(const ImageGray& curr, cons
     std::cout << "CUDA: Processing " << curr.width << "x" << curr.height << " frame with block size " << blockSize << std::endl;
     
     // Allocate GPU memory for frames
+    // TODO - optimize memory usage by using pitched memory or 2D arrays for better coalescing and cache performance, can be upload in constant memory.
     unsigned char* d_curr = nullptr;    // GPU pointer matrix for current frame
     unsigned char* d_ref = nullptr;     // GPU pointer matrix for reference frame 
     gpuErrorCheck(cudaMalloc((void**)&d_curr, bytesPerFrame));
@@ -143,16 +146,6 @@ vector<vector<MotionVector>> fullSearchCUDANaiveGray(const ImageGray& curr, cons
     }
     int threadsPerBlock = threadsPerBlockDim * threadsPerBlockDim;
     
-    // Allocate GPU memory for thread results
-    size_t threadResultsSize = blocksX * blocksY * threadsPerBlock * sizeof(int);
-    int* d_thread_sad = nullptr; // GPU pointer array for thread SAD results 
-    int* d_thread_dx = nullptr;  // GPU pointer array for thread dx results 
-    int* d_thread_dy = nullptr;  // GPU pointer array for thread dy results
-    // each thread writes its SAD, dx, and dy results to these arrays, which are later read by thread (0,0) of each block to find the global best match for that block
-    gpuErrorCheck(cudaMalloc((void**)&d_thread_sad, threadResultsSize)); // Each thread writes its SAD result to this array 
-    gpuErrorCheck(cudaMalloc((void**)&d_thread_dx, threadResultsSize)); // Each thread writes its dx result to this array
-    gpuErrorCheck(cudaMalloc((void**)&d_thread_dy, threadResultsSize)); // Each thread writes its dy result to this array
-    
     dim3 gridDim(blocksX, blocksY); // One block for each search block in current frame
     dim3 blockDim(threadsPerBlockDim, threadsPerBlockDim);  // Each block has threadsPerBlockDim × threadsPerBlockDim threads (e.g., 16×16 = 256 threads) to search reference frame positions in parallel
     
@@ -165,9 +158,12 @@ vector<vector<MotionVector>> fullSearchCUDANaiveGray(const ImageGray& curr, cons
     createCudaEvent(stop);
     recordCudaEvent(start);
     
-    fullSearchKernel<<<gridDim, blockDim>>>(d_curr, d_ref, d_mv, blockSize,
-                                            curr.width, curr.height, blocksX, blocksY,
-                                            d_thread_sad, d_thread_dx, d_thread_dy, threadsPerBlock);
+    // Allocate shared memory: threadsPerBlock * 3 arrays * sizeof(int) bytes per block
+    // TODOconsider this optimization: optimize shared memory usage by using a single array of structs or using warp-level primitives to reduce shared memory usage and synchronization overhead, can be upload in constant memory.
+
+    size_t sharedMemSize = blocksX * blocksY * 3 * sizeof(int);
+    fullSearchKernel<<<gridDim, blockDim, sharedMemSize>>>(d_curr, d_ref, d_mv, blockSize,
+                                            curr.width, curr.height, blocksX, blocksY, threadsPerBlock);
     gpuErrorCheck(cudaGetLastError());
     
     std::cout << "CUDA: Kernel launched, synchronizing..." << std::endl;
@@ -197,10 +193,7 @@ vector<vector<MotionVector>> fullSearchCUDANaiveGray(const ImageGray& curr, cons
     cudaFree(d_curr);
     cudaFree(d_ref);
     cudaFree(d_mv);
-    cudaFree(d_thread_sad);
-    cudaFree(d_thread_dx);
-    cudaFree(d_thread_dy);
-    
+
     std::cout << "CUDA: Complete!" << std::endl;
     return result;
 }

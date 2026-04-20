@@ -10,13 +10,15 @@ CXXFLAGS        = -std=c++17 -Wall -Wextra -O2 -fPIE -fpic
 INCLUDE_DIRS    = -Icommon/include \
                   -Isolutions/full_search/include \
                   -Isolutions/full_search/implementations/cpu_naive \
-                  -Isolutions/full_search/implementations/cuda_naive
+                  -Isolutions/full_search/implementations/cuda_naive \
+                  -Isolutions/full_search/implementations/cuda_optimized
 
 # Directory structure
 COMMON_SRC      = common/src
 FSEARCH_SRC     = solutions/full_search
 FSEARCH_CPU_SRC = solutions/full_search/implementations/cpu_naive
 FSEARCH_CUDA_SRC = solutions/full_search/implementations/cuda_naive
+FSEARCH_CUDA_OPTIMIZED_SRC = solutions/full_search/implementations/cuda_optimized
 BUILD_DIR       = build
 OUTPUT_DIR      = output
 
@@ -33,7 +35,9 @@ COMMON_OBJECTS  = $(BUILD_DIR)/main.o \
 FSEARCH_OBJECTS = $(BUILD_DIR)/fullSearchBM.o \
                   $(BUILD_DIR)/fullSearchBM_cpu_naive.o
 
-FSEARCH_CUDA_OBJECTS = $(BUILD_DIR)/FullSearchBM_cuda_naive.o
+FSEARCH_CUDA_OBJECTS = $(BUILD_DIR)/FullSearchBM_cuda_naive.o \
+                       $(BUILD_DIR)/FullSearchBM_cuda_optimized.o
+
 
 ALL_OBJECTS = $(COMMON_OBJECTS) $(FSEARCH_OBJECTS) $(FSEARCH_CUDA_OBJECTS)
 
@@ -70,6 +74,10 @@ $(BUILD_DIR)/fullSearchBM_cpu_naive.o: $(FSEARCH_CPU_SRC)/fullSearchBM_cpu_naive
 
 # Compile FullSearchBM_cuda_naive.cpp with nvcc
 $(BUILD_DIR)/FullSearchBM_cuda_naive.o: $(FSEARCH_CUDA_SRC)/FullSearchBM_cuda_naive.cpp | $(BUILD_DIR)
+	$(NVXX) $(NVXXFLAGS) $(NVOPTFLAGS) $(INCLUDE_DIRS) $< -c -o $@
+
+# Compile FullSearchBM_cuda_optimized.cpp with nvcc
+$(BUILD_DIR)/FullSearchBM_cuda_optimized.o: $(FSEARCH_CUDA_OPTIMIZED_SRC)/FullSearchBM_cuda_optimized.cpp | $(BUILD_DIR)
 	$(NVXX) $(NVXXFLAGS) $(NVOPTFLAGS) $(INCLUDE_DIRS) $< -c -o $@
 
 # Link executable with nvcc
