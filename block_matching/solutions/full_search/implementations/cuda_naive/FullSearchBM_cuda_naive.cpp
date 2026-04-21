@@ -81,6 +81,8 @@ __global__ void fullSearchKernel(const unsigned char* d_curr, const unsigned cha
     d_thread_dx[result_idx] = best_dx;
     d_thread_dy[result_idx] = best_dy;
     
+    __syncthreads(); // Ensure all threads have written their results to global memory before thread (0,0) reads them
+    
     // Only thread (0,0) finds the global best among all threads in this block, all other threads are idle at this point
     if (tidx == 0) {
         int global_best_sad = INT_MAX;

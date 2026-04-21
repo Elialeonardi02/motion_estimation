@@ -88,18 +88,23 @@ ImageColor drawMotionVectors(const ImageGray& frame,
             int cy = by * blockSize + blockSize / 2;
             dx *= scale;
             dy *= scale;
-            // Starting point (white dot)
-            drawLine(img, cx, cy, cx, cy, 255, 255, 255);
-            // Red motion vector line
-            drawLine(img, cx, cy, cx + dx, cy + dy, 255, 0, 0);
-            // V-shaped arrow head
+            
+            // Calculate endpoint and clip to image bounds
             int ex = cx + dx;
             int ey = cy + dy;
+            ex = max(0, min(ex, img.width - 1));
+            ey = max(0, min(ey, img.height - 1));
+            
+            // Starting point (white dot)
+            drawLine(img, cx, cy, cx, cy, 255, 255, 255);
+            // Red motion vector line (clipped)
+            drawLine(img, cx, cy, ex, ey, 255, 0, 0);
+            // V-shaped arrow head
             int arrow_len = 16;
-            float len = sqrt(dx * dx + dy * dy);
+            float len = sqrt((float)((ex - cx) * (ex - cx) + (ey - cy) * (ey - cy)));
             if(len > 0) {
-                float nx = dx / len;
-                float ny = dy / len;
+                float nx = (ex - cx) / len;
+                float ny = (ey - cy) / len;
                 // Back center point
                 int back_x = ex - arrow_len * nx;
                 int back_y = ey - arrow_len * ny;
@@ -141,18 +146,23 @@ ImageColor drawMotionVectorsRGB(const ImageColor& frame,
             int cy = by * blockSize + blockSize / 2;
             dx *= scale;
             dy *= scale;
-            // Starting point (white dot)
-            drawLine(img, cx, cy, cx, cy, 255, 255, 255);
-            // Red motion vector line
-            drawLine(img, cx, cy, cx + dx, cy + dy, 255, 0, 0);
-            // V-shaped arrow head
+            
+            // Calculate endpoint and clip to image bounds
             int ex = cx + dx;
             int ey = cy + dy;
+            ex = max(0, min(ex, img.width - 1));
+            ey = max(0, min(ey, img.height - 1));
+            
+            // Starting point (white dot)
+            drawLine(img, cx, cy, cx, cy, 255, 255, 255);
+            // Red motion vector line (clipped)
+            drawLine(img, cx, cy, ex, ey, 255, 0, 0);
+            // V-shaped arrow head
             int arrow_len = 16;
-            float len = sqrt(dx * dx + dy * dy);
+            float len = sqrt((float)((ex - cx) * (ex - cx) + (ey - cy) * (ey - cy)));
             if(len > 0) {
-                float nx = dx / len;
-                float ny = dy / len;
+                float nx = (ex - cx) / len;
+                float ny = (ey - cy) / len;
                 // Back center point
                 int back_x = ex - arrow_len * nx;
                 int back_y = ey - arrow_len * ny;

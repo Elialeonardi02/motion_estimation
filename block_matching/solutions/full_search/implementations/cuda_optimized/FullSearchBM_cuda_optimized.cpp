@@ -25,7 +25,9 @@ static __device__ int computeSAD_device(const unsigned char* curr, const unsigne
 __global__ void fullSearchKernel(const unsigned char* d_curr, const unsigned char* d_ref,
                                  MotionVector* d_mv, int blockSize,
                                  int width, int height, int blocksX, int blocksY, int threadsPerBlock) {
-    // Grid block index (one per search block in current frame)
+    // TODO -optimization: use shared memory to store current block d_curr and d_ref to reduce global memory access and improve performance, but this requires careful management of shared memory size and thread cooperation to load the block data before processing.
+    
+                                    // Grid block index (one per search block in current frame)
     int bx = blockIdx.x; // Block index in x direction (search block column)
     int by = blockIdx.y; // Block index in y direction (search block row)
     
@@ -35,7 +37,6 @@ __global__ void fullSearchKernel(const unsigned char* d_curr, const unsigned cha
     int tx = threadIdx.x; // Thread index in x direction (within block)
     int ty = threadIdx.y; // Thread index in y direction (within block)
     int tidx = ty * blockDim.x + tx;  // linear thread index (0 to threadsPerBlock-1)
-    int total_threads = blockDim.x * blockDim.y;    // Total threads in this block (e.g., 256 for 16x16 blockDim)
     
     // Top-left corner, to define search block in current frame based on de grid block index
     int search_x = bx * blockSize;  // x coordinate of top-left corner of search block in current frame
@@ -51,7 +52,7 @@ __global__ void fullSearchKernel(const unsigned char* d_curr, const unsigned cha
     int best_dx = 0, best_dy = 0;
     
     // Each thread searches one or more positions (depending on search space size)
-    if (total_positions <= total_threads) { // each thread process at most one position
+    if (total_positions <= threadsPerBlock) { // each thread process at most one position
         if (tidx < total_positions) { // some threads may be in idle
             int ref_y = tidx / max_ref_x; // y coordinate of candidate block in reference frame based on linear thread index
             int ref_x = tidx % max_ref_x; // x coordinate of candidate block in reference frame based on linear thread index    
@@ -61,7 +62,7 @@ __global__ void fullSearchKernel(const unsigned char* d_curr, const unsigned cha
         }
     } else {
         // Many positions: distribute work across threads
-        for (int pos = tidx; pos < total_positions; pos += total_threads) {
+        for (int pos = tidx; pos < total_positions; pos += threadsPerBlock) {
             int ref_y = pos / max_ref_x; // y coordinate of candidate block in reference frame based on linear thread index
             int ref_x = pos % max_ref_x; // x coordinate of candidate block in reference frame based on linear thread index
             int sad = computeSAD_device(d_curr, d_ref, search_x, search_y, ref_x, ref_y, blockSize, width);
@@ -73,31 +74,40 @@ __global__ void fullSearchKernel(const unsigned char* d_curr, const unsigned cha
         }
     }
     
-    // Write thread result to global memory (each thread has its own location)
-    int result_idx = (bx + by * blocksX ) * threadsPerBlock + tidx;
-    extern __shared__ int shared_block_thread_sad[] ; // Shared memory for thread SAD results (max 1024 threads per block)
-    extern __shared__ int shared_block_thread_dx[];  // Shared memory for thread dx results
-    extern __shared__ int shared_block_thread_dy[];  // Shared memory
+    // Write thread result to shared memory (single buffer with manual offset calculation)
+    extern __shared__ int shared_memory[]; // Single shared memory buffer
+    
+    // Divide shared memory into 3 arrays with manual offset calculation
+    int* shared_block_thread_sad = shared_memory;
+    int* shared_block_thread_dx = shared_memory + threadsPerBlock;
+    int* shared_block_thread_dy = shared_memory + (threadsPerBlock * 2);
+    
     shared_block_thread_sad[tidx] = best_sad;
     shared_block_thread_dx[tidx] = best_dx;
     shared_block_thread_dy[tidx] = best_dy;
     
-    __syncthreads(); // Ensure all threads have written their results to shared memory before thread (0,0) reads them
+    __syncthreads(); // Ensure all threads have written their results to shared memory
 
-    // Only thread (0,0) finds the global best among all threads in this block, all other threads are idle at this point
-    if (tidx == 0) {
-        int global_best_sad = INT_MAX;
-        int global_best_dx = 0, global_best_dy = 0;
-        
-        for (int i = 0; i < total_threads; i++) {
-            if (shared_block_thread_sad[i] < global_best_sad) {
-                global_best_sad = shared_block_thread_sad[i];
-                global_best_dx = shared_block_thread_dx[i];
-                global_best_dy = shared_block_thread_dy[i];
+    // Tree reduction: each step halves the number of active threads
+    // Thread tid reads from tid + stride and compares
+    // FIXME - this reduction assumes threadsPerBlock is a power of 2, which is true for common block sizes (e.g., 16, 32) but should be handled more robustly for arbitrary block sizes in production code
+    // FIXME - this reduction also assumes threads are fully occupied, which may not be the case if total_positions < threadsPerBlock, so some threads may have invalid results that need to be ignored in the reduction (e.g., by initializing their SAD to INT_MAX and ensuring they do not affect the minimum search)
+    // FIXME - this redcution leave a lot of thread inactive in the later steps, which is not optimal, coaleshing? warp shuffle? 
+    for(int stride = threadsPerBlock / 2; stride > 0; stride /= 2) {
+        if(tidx < stride) {
+            // Thread tidx compares with thread (tidx + stride)
+            if(shared_block_thread_sad[tidx + stride] < shared_block_thread_sad[tidx]) {
+                shared_block_thread_sad[tidx] = shared_block_thread_sad[tidx + stride];
+                shared_block_thread_dx[tidx] = shared_block_thread_dx[tidx + stride];
+                shared_block_thread_dy[tidx] = shared_block_thread_dy[tidx + stride];
             }
         }
-        
-        d_mv[by * blocksX + bx] = {global_best_dx, global_best_dy};
+        __syncthreads();
+    }
+
+    // Thread 0 has the final best result after all reduction steps
+    if(tidx == 0) {
+        d_mv[by * blocksX + bx] = {shared_block_thread_dx[0], shared_block_thread_dy[0]};
     }
 }
 
@@ -118,6 +128,8 @@ vector<vector<MotionVector>> fullSearchCUDAOptimizedGray(const ImageGray& curr, 
     
     // Allocate GPU memory for frames
     // TODO - optimize memory usage by using pitched memory or 2D arrays for better coalescing and cache performance, can be upload in constant memory.
+    // constant memory could be an optimal solution for reading current and reference frame, but is impossible to fit 2 immage in 64 KB
+    
     unsigned char* d_curr = nullptr;    // GPU pointer matrix for current frame
     unsigned char* d_ref = nullptr;     // GPU pointer matrix for reference frame 
     gpuErrorCheck(cudaMalloc((void**)&d_curr, bytesPerFrame));
@@ -158,10 +170,9 @@ vector<vector<MotionVector>> fullSearchCUDAOptimizedGray(const ImageGray& curr, 
     createCudaEvent(stop);
     recordCudaEvent(start);
     
-    // Allocate shared memory: threadsPerBlock * 3 arrays * sizeof(int) bytes per block
-    // TODOconsider this optimization: optimize shared memory usage by using a single array of structs or using warp-level primitives to reduce shared memory usage and synchronization overhead, can be upload in constant memory.
-
-    size_t sharedMemSize = blocksX * blocksY * 3 * sizeof(int);
+    // Allocate shared memory: total_threads * 3 arrays * sizeof(int) bytes per block
+    // Total threads = threadsPerBlockDim * threadsPerBlockDim (e.g., 32*32 = 1024)
+    size_t sharedMemSize = threadsPerBlock * 3 * sizeof(int);
     fullSearchKernel<<<gridDim, blockDim, sharedMemSize>>>(d_curr, d_ref, d_mv, blockSize,
                                             curr.width, curr.height, blocksX, blocksY, threadsPerBlock);
     gpuErrorCheck(cudaGetLastError());
