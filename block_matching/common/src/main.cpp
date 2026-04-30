@@ -217,7 +217,7 @@ int main(int argc, char* argv[]) {
 
                 string output_name = generateOutputFilename(isRange, range_start, i, ref_path, curr_path);
                 string output_path = output_dir + "/" + output_name;
-                savePPM(drawMotionVectorsRGB(curr_frame, mv, blockSize), output_path);
+                savePPM(drawMotionVectorsRGB(curr_frame, ref_frame, mv, blockSize), output_path);
                 cout << "Motion vectors saved in " << output_path << endl;
                 
                 // Save frame difference image
@@ -225,6 +225,16 @@ int main(int argc, char* argv[]) {
                 string diff_path = output_path.substr(0, last_dot) + "_diff.ppm";
                 savePPM(drawFrameDifferenceRGB(ref_frame, curr_frame), diff_path);
                 cout << "Frame difference saved in " << diff_path << endl;
+                
+                // Save reference frame with grid
+                string ref_grid_path = output_path.substr(0, last_dot) + "_ref_grid.ppm";
+                savePPM(drawFrameWithGridRGB(ref_frame, blockSize), ref_grid_path);
+                cout << "Reference frame with grid saved in " << ref_grid_path << endl;
+                
+                // Save current frame with grid
+                string curr_grid_path = output_path.substr(0, last_dot) + "_curr_grid.ppm";
+                savePPM(drawFrameWithGridRGB(curr_frame, blockSize), curr_grid_path);
+                cout << "Current frame with grid saved in " << curr_grid_path << endl;
 
             } else {
                 ImageGray ref_frame, curr_frame;
@@ -240,13 +250,19 @@ int main(int argc, char* argv[]) {
 
                 chrono::high_resolution_clock::time_point start = chrono::high_resolution_clock::now();
                 vector<vector<MotionVector>> mv = matcher->matchGray(curr_frame, ref_frame, blockSize);
+                for (size_t i = 0; i < mv.size(); i++) {
+                    for (size_t j = 0; j < mv[i].size(); j++) {
+                        std::cout << "mv[" << i << "][" << j << "] = ("
+                                << mv[i][j].dx << ", " << mv[i][j].dy << ")\n";
+                    }
+                }
                 chrono::high_resolution_clock::time_point end = chrono::high_resolution_clock::now();
                 chrono::duration<double> elapsed = end - start;
                 cout << "Matching time: " << elapsed.count() << " s" << endl;
                 
                 string output_name = generateOutputFilename(isRange, range_start, i, ref_path, curr_path);
                 string output_path = output_dir + "/" + output_name;
-                savePPM(drawMotionVectors(curr_frame, mv, blockSize), output_path);
+                savePPM(drawMotionVectors(curr_frame, ref_frame, mv, blockSize), output_path);
                 cout << "Motion vectors saved in " << output_path << endl;
                 
                 // Save frame difference image
@@ -254,6 +270,16 @@ int main(int argc, char* argv[]) {
                 string diff_path = output_path.substr(0, last_dot) + "_diff.ppm";
                 savePPM(drawFrameDifference(ref_frame, curr_frame), diff_path);
                 cout << "Frame difference saved in " << diff_path << endl;
+                
+                // Save reference frame with grid
+                string ref_grid_path = output_path.substr(0, last_dot) + "_ref_grid.ppm";
+                savePPM(drawFrameWithGrid(ref_frame, blockSize), ref_grid_path);
+                cout << "Reference frame with grid saved in " << ref_grid_path << endl;
+                
+                // Save current frame with grid
+                string curr_grid_path = output_path.substr(0, last_dot) + "_curr_grid.ppm";
+                savePPM(drawFrameWithGrid(curr_frame, blockSize), curr_grid_path);
+                cout << "Current frame with grid saved in " << curr_grid_path << endl;
             }
         } catch(const exception& e) {
             cerr << "Error during processing: " << e.what() << endl;

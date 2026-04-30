@@ -6,6 +6,7 @@
 #include <cuda_runtime.h>
 #include "FullSearchBM_cuda_optimized.h"
 #include "cuda_utils.h"
+#include "sad_utils.h"
 
 using namespace std;
 
@@ -48,7 +49,7 @@ __global__ void fullSearchKernel(const unsigned char* d_curr, const unsigned cha
     int total_positions = max_ref_x * max_ref_y; // Total candidate positions in reference frame for this current search block (all possible top-left corners of blockSize in reference frame)
     
     // Thread-local best match
-    int best_sad = INT_MAX; // Initialize best SAD with worst case.
+    int best_sad = INT_MAX; // Initialize best SAD with worst case
     int best_dx = 0, best_dy = 0;
     
     // Each thread searches one or more positions (depending on search space size)
@@ -57,8 +58,8 @@ __global__ void fullSearchKernel(const unsigned char* d_curr, const unsigned cha
             int ref_y = tidx / max_ref_x; // y coordinate of candidate block in reference frame based on linear thread index
             int ref_x = tidx % max_ref_x; // x coordinate of candidate block in reference frame based on linear thread index    
             best_sad = computeSAD_device(d_curr, d_ref, search_x, search_y, ref_x, ref_y, blockSize, width);
-            best_dx = ref_x - search_x;  
-            best_dy = ref_y - search_y;
+            best_dx = search_x - ref_x;  
+            best_dy = search_y - ref_y;
         }
     } else {
         // Many positions: distribute work across threads
@@ -68,8 +69,8 @@ __global__ void fullSearchKernel(const unsigned char* d_curr, const unsigned cha
             int sad = computeSAD_device(d_curr, d_ref, search_x, search_y, ref_x, ref_y, blockSize, width);
             if (sad < best_sad) {
                 best_sad = sad;
-                best_dx = ref_x - search_x;
-                best_dy = ref_y - search_y;
+                best_dx = search_x - ref_x;
+                best_dy = search_y - ref_y;
             }
         }
     }
@@ -91,7 +92,6 @@ __global__ void fullSearchKernel(const unsigned char* d_curr, const unsigned cha
     // Tree reduction: each step halves the number of active threads
     // Thread tid reads from tid + stride and compares
     // FIXME - this reduction assumes threadsPerBlock is a power of 2, which is true for common block sizes (e.g., 16, 32) but should be handled more robustly for arbitrary block sizes in production code
-    // FIXME - this reduction also assumes threads are fully occupied, which may not be the case if total_positions < threadsPerBlock, so some threads may have invalid results that need to be ignored in the reduction (e.g., by initializing their SAD to INT_MAX and ensuring they do not affect the minimum search)
     // FIXME - this redcution leave a lot of thread inactive in the later steps, which is not optimal, coaleshing? warp shuffle? 
     for(int stride = threadsPerBlock / 2; stride > 0; stride /= 2) {
         if(tidx < stride) {

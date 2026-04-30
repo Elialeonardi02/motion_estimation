@@ -1,38 +1,11 @@
 #include "fullSearchBM_cpu_naive.h"
+#include "sad_utils.h"
 #include <cmath>
 #include <limits>
 #include <iostream>
 #include <chrono>
 
 using namespace std;
-
-// Compute SAD (Sum of Absolute Differences) for grayscale block in current and reference images
-// SAD = Σ|I_curr(x1+i, y1+j) - I_ref(x2+i, y2+j)| for all (i,j) in block
-int computeSAD(const ImageGray& curr, const ImageGray& ref,
-               int x1, int y1, int x2, int y2, int blockSize) {
-    int sad = 0;
-    for(int y = 0; y < blockSize; y++)
-        for(int x = 0; x < blockSize; x++)
-            // Accumulate absolute differences between corresponding pixels: |pixel_curr - pixel_ref|
-            sad += abs(curr.at(x1 + x, y1 + y) - ref.at(x2 + x, y2 + y));
-    return sad;
-}
-
-// Compute SAD (Sum of Absolute Differences) for RGB color block
-// SAD_RGB = Σ Σ |I_curr[c](x1+i, y1+j) - I_ref[c](x2+i, y2+j)| for all (i,j) in block and all channels c={0,1,2}
-int computeSADRGB(const ImageColor& curr, const ImageColor& ref,
-                  int x1, int y1, int x2, int y2, int blockSize) {
-    int sad = 0;
-    for(int y = 0; y < blockSize; y++) {
-        for(int x = 0; x < blockSize; x++) {
-            // Sum differences across all 3 color channels (Red, Green, Blue)
-            for(int c = 0; c < 3; c++) {
-                sad += abs(curr.at(x1 + x, y1 + y, c) - ref.at(x2 + x, y2 + y, c));
-            }
-        }
-    }
-    return sad;
-}
 
 // Full Search Block Matching (FSBM) for grayscale images
 vector<vector<MotionVector>> fullSearchCPUNaiveGray(const ImageGray& curr, const ImageGray& ref,
@@ -59,8 +32,13 @@ vector<vector<MotionVector>> fullSearchCPUNaiveGray(const ImageGray& curr, const
                     int dx = refX - x;
                     int dy = refY - y;
                     int sad = computeSAD(curr, ref, x, y, refX, refY, blockSize);
-                    // Keep track of motion vector with minimum SAD (best match)
-                    if(sad < bestSAD) { bestSAD = sad; bestMV = {dx, dy}; }
+                    int dist     = dx * dx + dy * dy;
+                    int bestDist = bestMV.dx * bestMV.dx + bestMV.dy * bestMV.dy;
+
+                    if (sad < bestSAD || (sad == bestSAD && dist < bestDist)) {
+                        bestSAD = sad;
+                        bestMV = {dx, dy};
+                    }
                 }
             }
             mv[by][bx] = bestMV;
@@ -105,7 +83,10 @@ vector<vector<MotionVector>> fullSearchCPUNaiveRGB(const ImageColor& curr, const
                     int dy = refY - y;
                     int sad = computeSADRGB(curr, ref, x, y, refX, refY, blockSize);
                     // Keep track of motion vector with minimum SAD (best match)
-                    if(sad < bestSAD) { bestSAD = sad; bestMV = {dx, dy}; }
+                    if(sad < bestSAD) {
+                        bestSAD = sad;
+                        bestMV = {dx, dy};
+                    }
                 }
             }
             mv[by][bx] = bestMV;

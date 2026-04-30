@@ -6,6 +6,7 @@
 #include <cuda_runtime.h>
 #include "FullSearchBM_cuda_naive.h"
 #include "cuda_utils.h"
+#include "sad_utils.h"
 
 using namespace std;
 
@@ -49,7 +50,7 @@ __global__ void fullSearchKernel(const unsigned char* d_curr, const unsigned cha
     int total_positions = max_ref_x * max_ref_y; // Total candidate positions in reference frame for this current search block (all possible top-left corners of blockSize in reference frame)
     
     // Thread-local best match
-    int best_sad = INT_MAX; // Initialize best SAD with worst case.
+    int best_sad = INT_MAX; // Initialize best SAD with worst case
     int best_dx = 0, best_dy = 0;
     
     // Each thread searches one or more positions (depending on search space size)
@@ -58,8 +59,8 @@ __global__ void fullSearchKernel(const unsigned char* d_curr, const unsigned cha
             int ref_y = tidx / max_ref_x; // y coordinate of candidate block in reference frame based on linear thread index
             int ref_x = tidx % max_ref_x; // x coordinate of candidate block in reference frame based on linear thread index    
             best_sad = computeSAD_device(d_curr, d_ref, search_x, search_y, ref_x, ref_y, blockSize, width);
-            best_dx = ref_x - search_x;  
-            best_dy = ref_y - search_y;
+            best_dx = search_x - ref_x;
+            best_dy = search_y - ref_y;
         }
     } else {
         // Many positions: distribute work across threads
@@ -69,8 +70,8 @@ __global__ void fullSearchKernel(const unsigned char* d_curr, const unsigned cha
             int sad = computeSAD_device(d_curr, d_ref, search_x, search_y, ref_x, ref_y, blockSize, width);
             if (sad < best_sad) {
                 best_sad = sad;
-                best_dx = ref_x - search_x;
-                best_dy = ref_y - search_y;
+                best_dx = search_x - ref_x;
+                best_dy = search_y - ref_y;
             }
         }
     }

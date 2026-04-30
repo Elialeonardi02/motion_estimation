@@ -5,7 +5,6 @@
 #include <cuda_runtime.h>
 #include "types.h"
 
-
 // Full search block matching on GPU (naive CUDA implementation)
 // Computes motion vectors between current and reference frames
 //
@@ -16,6 +15,8 @@
 //
 // Returns:
 // - 2D vector of MotionVector structures (height x width)
+
+// Declaration - implementation is in FullSearchBM_cuda_naive.cpp
 std::vector<std::vector<MotionVector>> fullSearchCUDANaiveGray(const ImageGray& curr, const ImageGray& ref, 
                                                                 int blockSize);
 
