@@ -26,7 +26,7 @@ static __device__ int computeSAD_device(const unsigned char* curr, const unsigne
 __global__ void fullSearchKernel(const unsigned char* d_curr, const unsigned char* d_ref,
                                  MotionVector* d_mv, int blockSize,
                                  int width, int height, int blocksX, int blocksY, int threadsPerBlock) {
-    // TODO -optimization: use shared memory to store current block d_curr and d_ref to reduce global memory access and improve performance, but this requires careful management of shared memory size and thread cooperation to load the block data before processing.
+    // TODO -optimization: use shared memory to store current block d_curr.
     
                                     // Grid block index (one per search block in current frame)
     int bx = blockIdx.x; // Block index in x direction (search block column)
@@ -67,7 +67,9 @@ __global__ void fullSearchKernel(const unsigned char* d_curr, const unsigned cha
             int ref_y = pos / max_ref_x; // y coordinate of candidate block in reference frame based on linear thread index
             int ref_x = pos % max_ref_x; // x coordinate of candidate block in reference frame based on linear thread index
             int sad = computeSAD_device(d_curr, d_ref, x, y, ref_x, ref_y, blockSize, width);
-            if (sad < best_sad) {
+            int dist = (ref_x - x) * (ref_x - x) + (ref_y - y) * (ref_y - y);
+            int best_dist = best_dx * best_dx + best_dy * best_dy;
+            if (sad < best_sad || (sad == best_sad && dist < best_dist)) {
                 best_sad = sad;
                 best_dx = ref_x - x;
                 best_dy = ref_y - y;
@@ -96,7 +98,12 @@ __global__ void fullSearchKernel(const unsigned char* d_curr, const unsigned cha
     for(int stride = threadsPerBlock / 2; stride > 0; stride /= 2) {
         if(tidx < stride) {
             // Thread tidx compares with thread (tidx + stride)
-            if(shared_block_thread_sad[tidx + stride] < shared_block_thread_sad[tidx]) {
+            int dist = shared_block_thread_dx[tidx + stride] * shared_block_thread_dx[tidx + stride] + 
+                      shared_block_thread_dy[tidx + stride] * shared_block_thread_dy[tidx + stride];
+            int best_dist = shared_block_thread_dx[tidx] * shared_block_thread_dx[tidx] + 
+                           shared_block_thread_dy[tidx] * shared_block_thread_dy[tidx];
+            if(shared_block_thread_sad[tidx + stride] < shared_block_thread_sad[tidx] || 
+               (shared_block_thread_sad[tidx + stride] == shared_block_thread_sad[tidx] && dist < best_dist)) {
                 shared_block_thread_sad[tidx] = shared_block_thread_sad[tidx + stride];
                 shared_block_thread_dx[tidx] = shared_block_thread_dx[tidx + stride];
                 shared_block_thread_dy[tidx] = shared_block_thread_dy[tidx + stride];

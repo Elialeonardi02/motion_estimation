@@ -68,7 +68,9 @@ __global__ void fullSearchKernel(const unsigned char* d_curr, const unsigned cha
             int ref_y = pos / max_ref_x; // y coordinate of candidate block in reference frame based on linear thread index
             int ref_x = pos % max_ref_x; // x coordinate of candidate block in reference frame based on linear thread index
             int sad = computeSAD_device(d_curr, d_ref, x, y, ref_x, ref_y, blockSize, width);
-            if (sad < best_sad) {
+            int dist = (ref_x - x) * (ref_x - x) + (ref_y - y) * (ref_y - y);
+            int best_dist = best_dx * best_dx + best_dy * best_dy;
+            if (sad < best_sad || (sad == best_sad && dist < best_dist)) {
                 best_sad = sad;
                 best_dx =   ref_x - x;
                 best_dy =  ref_y - y;
@@ -91,7 +93,9 @@ __global__ void fullSearchKernel(const unsigned char* d_curr, const unsigned cha
         
         for (int i = 0; i < total_threads; i++) {
             int idx = (bx + by * blocksX ) * threadsPerBlock + i; // index for thread i in this block 
-            if (d_thread_sad[idx] < global_best_sad) {
+            int dist = d_thread_dx[idx] * d_thread_dx[idx] + d_thread_dy[idx] * d_thread_dy[idx];
+            int best_dist = global_best_dx * global_best_dx + global_best_dy * global_best_dy;
+            if (d_thread_sad[idx] < global_best_sad || (d_thread_sad[idx] == global_best_sad && dist < best_dist)) {
                 global_best_sad = d_thread_sad[idx];
                 global_best_dx = d_thread_dx[idx];
                 global_best_dy = d_thread_dy[idx];
