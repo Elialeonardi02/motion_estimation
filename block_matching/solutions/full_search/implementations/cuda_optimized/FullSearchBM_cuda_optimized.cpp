@@ -40,8 +40,8 @@ __global__ void fullSearchKernel(const unsigned char* d_curr, const unsigned cha
     int tidx = ty * blockDim.x + tx;  // linear thread index (0 to threadsPerBlock-1)
     
     // Top-left corner, to define search block in current frame based on de grid block index
-    int search_x = bx * blockSize;  // x coordinate of top-left corner of search block in current frame
-    int search_y = by * blockSize;  // y coordinate of top-left corner of search block in current frame
+    int x = bx * blockSize;  // x coordinate of top-left corner of search block in current frame
+    int y = by * blockSize;  // y coordinate of top-left corner of search block in current frame
     
     // Search space dimensions in reference frame
     int max_ref_x = width - blockSize;          // Maximum x coordinate for top-left corner of block in reference frame (to fit blockSize)  
@@ -57,20 +57,20 @@ __global__ void fullSearchKernel(const unsigned char* d_curr, const unsigned cha
         if (tidx < total_positions) { // some threads may be in idle
             int ref_y = tidx / max_ref_x; // y coordinate of candidate block in reference frame based on linear thread index
             int ref_x = tidx % max_ref_x; // x coordinate of candidate block in reference frame based on linear thread index    
-            best_sad = computeSAD_device(d_curr, d_ref, search_x, search_y, ref_x, ref_y, blockSize, width);
-            best_dx = search_x - ref_x;  
-            best_dy = search_y - ref_y;
+            best_sad = computeSAD_device(d_curr, d_ref, x, y, ref_x, ref_y, blockSize, width);
+            best_dx = ref_x - x;  
+            best_dy = ref_y - y;
         }
     } else {
         // Many positions: distribute work across threads
         for (int pos = tidx; pos < total_positions; pos += threadsPerBlock) {
             int ref_y = pos / max_ref_x; // y coordinate of candidate block in reference frame based on linear thread index
             int ref_x = pos % max_ref_x; // x coordinate of candidate block in reference frame based on linear thread index
-            int sad = computeSAD_device(d_curr, d_ref, search_x, search_y, ref_x, ref_y, blockSize, width);
+            int sad = computeSAD_device(d_curr, d_ref, x, y, ref_x, ref_y, blockSize, width);
             if (sad < best_sad) {
                 best_sad = sad;
-                best_dx = search_x - ref_x;
-                best_dy = search_y - ref_y;
+                best_dx = ref_x - x;
+                best_dy = ref_y - y;
             }
         }
     }
