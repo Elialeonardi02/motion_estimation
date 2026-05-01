@@ -9,16 +9,16 @@ CXXFLAGS        = -std=c++17 -Wall -Wextra -O2 -fPIE -fpic
 
 INCLUDE_DIRS    = -Icommon/include \
                   -Isolutions/full_search/include \
-                  -Isolutions/full_search/implementations/cpu_naive \
-                  -Isolutions/full_search/implementations/cuda_naive \
-                  -Isolutions/full_search/implementations/cuda_optimized
+                  -Isolutions/full_search/cpu_naive \
+                  -Isolutions/full_search/cuda_naive \
+                  -Isolutions/full_search/cuda_optimized
 
 # Directory structure
 COMMON_SRC      = common/src
-FSEARCH_SRC     = solutions/full_search
-FSEARCH_CPU_SRC = solutions/full_search/implementations/cpu_naive
-FSEARCH_CUDA_SRC = solutions/full_search/implementations/cuda_naive
-FSEARCH_CUDA_OPTIMIZED_SRC = solutions/full_search/implementations/cuda_optimized
+FSEARCH_SRC     = full_search
+FSEARCH_CPU_SRC = solutions/full_search/cpu_naive
+FSEARCH_CUDA_SRC = solutions/full_search/cuda_naive
+FSEARCH_CUDA_OPTIMIZED_SRC = solutions/full_search/cuda_optimized
 BUILD_DIR       = build
 OUTPUT_DIR      = output
 
