@@ -11,7 +11,9 @@ INCLUDE_DIRS    = -Icommon/include \
                   -Isolutions/full_search/include \
                   -Isolutions/full_search/cpu_naive \
                   -Isolutions/full_search/cuda_naive \
-                  -Isolutions/full_search/cuda_optimized
+                  -Isolutions/full_search/cuda_optimized \
+				  -Isolutions/logarithmic_search/include \
+				  -Isolutions/logarithmic_search/cpu_naive
 
 # Directory structure
 COMMON_SRC      = common/src
@@ -19,6 +21,7 @@ FSEARCH_SRC     = full_search
 FSEARCH_CPU_SRC = solutions/full_search/cpu_naive
 FSEARCH_CUDA_SRC = solutions/full_search/cuda_naive
 FSEARCH_CUDA_OPTIMIZED_SRC = solutions/full_search/cuda_optimized
+LSEARCH_CPU_SRC = solutions/logarithmic_search/cpu_naive
 BUILD_DIR       = build
 OUTPUT_DIR      = output
 
@@ -34,6 +37,8 @@ COMMON_OBJECTS  = $(BUILD_DIR)/main.o \
 
 FSEARCH_OBJECTS = $(BUILD_DIR)/fullSearchBM_cpu_naive.o
 
+LSEARCH_CPU_OBJECTS = $(BUILD_DIR)/logarithmicSearchBM_cpu_naive.o
+
 FSEARCH_CUDA_OBJECTS = $(BUILD_DIR)/FullSearchBM_cuda_naive.o \
                        $(BUILD_DIR)/FullSearchBM_cuda_optimized.o
 
@@ -42,9 +47,9 @@ FSEARCH_CUDA_OBJECTS = $(BUILD_DIR)/FullSearchBM_cuda_naive.o \
 HAVE_CUDA := $(shell command -v nvcc 2> /dev/null)
 
 ifdef HAVE_CUDA
-  ALL_OBJECTS = $(COMMON_OBJECTS) $(FSEARCH_OBJECTS) $(FSEARCH_CUDA_OBJECTS)
+  ALL_OBJECTS = $(COMMON_OBJECTS) $(FSEARCH_OBJECTS) $(LSEARCH_CPU_OBJECTS) $(FSEARCH_CUDA_OBJECTS)
 else
-  ALL_OBJECTS = $(COMMON_OBJECTS) $(FSEARCH_OBJECTS)
+  ALL_OBJECTS = $(COMMON_OBJECTS) $(FSEARCH_OBJECTS) $(LSEARCH_CPU_OBJECTS)
   CXXFLAGS += -DNO_CUDA
   $(warning nvcc not found. Building CPU-only version.)
 endif
@@ -74,6 +79,10 @@ $(BUILD_DIR)/blockMatchingFactory.o: $(COMMON_SRC)/blockMatchingFactory.cpp | $(
 
 # Compile fullSearchBM_cpu_naive.cpp with g++
 $(BUILD_DIR)/fullSearchBM_cpu_naive.o: $(FSEARCH_CPU_SRC)/fullSearchBM_cpu_naive.cpp | $(BUILD_DIR)
+	g++ $(CXXFLAGS) $(INCLUDE_DIRS) -c $< -o $@
+
+# Compile logarithmicSearchBM_cpu_naive.cpp with g++
+$(BUILD_DIR)/logarithmicSearchBM_cpu_naive.o: $(LSEARCH_CPU_SRC)/logarithmicSearchBM_cpu_naive.cpp | $(BUILD_DIR)
 	g++ $(CXXFLAGS) $(INCLUDE_DIRS) -c $< -o $@
 
 # Compile FullSearchBM_cuda_naive.cpp with nvcc (only if CUDA is available)

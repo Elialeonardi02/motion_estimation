@@ -21,6 +21,9 @@ public:
         const ImageColor& curr, 
         const ImageColor& ref,
         int blockSize) = 0;
+    
+    // Set algorithm-specific parameters (e.g., search distance for logarithmic search)
+    virtual void setDistance(int) {}
 };
 
 // Factory function to create block matcher instances

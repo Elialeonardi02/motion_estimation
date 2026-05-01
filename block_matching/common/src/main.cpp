@@ -19,6 +19,7 @@ int main(int argc, char* argv[]) {
     int width = 0, height = 0;
     bool isColor = false;
     int blockSize = 32;
+    int distance = 32;  // Default search distance for logarithmic search
 
     
     // Block matching algorithm and implementation selection
@@ -98,6 +99,13 @@ int main(int argc, char* argv[]) {
                 cerr << "Error: --block-size requires a numeric value" << endl;
                 return 1;
             }
+        } else if(arg == "--distance") {
+            if(i + 1 < argc) {
+                distance = atoi(argv[++i]);
+            } else {
+                cerr << "Error: --distance requires a numeric value" << endl;
+                return 1;
+            }
         } else {
             image_paths.push_back(arg);
         }
@@ -123,13 +131,14 @@ int main(int argc, char* argv[]) {
              << " [--algorithm <algorithm>] [--implementation <impl>]"
              << " [--input-dir <dir>] [--range <prefix> <suffix> <start> <end>]"
              << " [--format pgm|ppm|raw] [--width W] [--height H] [--color]"
-             << " [--block-size <size>]"
+             << " [--block-size <size>] [--distance <dist>]"
              << " <image1> <image2> ..." << endl;
         cerr << "At least two images are required for motion estimation." << endl;
         cerr << "For RAW format, specify --width and --height. Use --color to specify RGB images (default is grayscale)." << endl;
-        cerr << "Available algorithms: full_search" << endl;
+        cerr << "Available algorithms: full_search, logarithmic_search" << endl;
         cerr << "Available implementations: cpu_naive, cuda_naive, cuda_optimized" << endl;
         cerr << "Default block size: 32 (full frame search)" << endl;
+        cerr << "Default search distance: 32 (used only for logarithmic_search)" << endl;
         return 1;
     }
 
@@ -175,6 +184,9 @@ int main(int argc, char* argv[]) {
     cout << "  Algorithm: " << algorithm << endl;
     cout << "  Implementation: " << implementation << endl;
     cout << "  Block size: " << blockSize << endl;
+    if(algorithm == "logarithmic_search") {
+        cout << "  Search distance: " << distance << endl;
+    }
     cout << "  Search mode: Full frame (naive)" << endl;
     cout << "  Output directory: " << output_dir << endl << endl;
 
@@ -186,6 +198,9 @@ int main(int argc, char* argv[]) {
         cerr << "Error creating block matcher: " << e.what() << endl;
         return 1;
     }
+    
+    // Set algorithm-specific parameters
+    matcher->setDistance(distance);
 
     bool isRange = !range_prefix.empty();
 
