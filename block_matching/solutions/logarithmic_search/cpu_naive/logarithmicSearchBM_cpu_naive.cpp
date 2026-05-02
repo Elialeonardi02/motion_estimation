@@ -25,15 +25,16 @@ vector<vector<MotionVector>> logarithmicSearchCPUNaiveGray(const ImageGray& curr
             int y = by * blockSize;
             int cx = x;
             int cy = y;
-            int bestSAD = numeric_limits<int>::max();
-            MotionVector bestMV{0, 0};
-            // TODO - Implement logarithmic search pattern instead of full search
+            // Logarithmic search: start with the initial distance and keep halving it until it becomes 0
             for (int currentDistance = distance; currentDistance > 0; currentDistance /= 2) {
                 // Check the 8 points around the block in the current frame at the current distance 
                 // plus the center point (0,0) which is the current block position in the reference frame
                 // (-d,d), (0,d), (d,d), 
                 // (-d,0), (0,0), (d,0), 
                 // (-d,-d), (0,-d), (d,-d)
+                int iterBestSAD = numeric_limits<int>::max();
+                int iterBestDX  = 0;
+                int iterBestDY  = 0;
                 for (int dy = -currentDistance; dy <= currentDistance; dy += currentDistance) {
                     for (int dx = -currentDistance; dx <= currentDistance; dx += currentDistance) {
                         // compute the displacement (dx, dy) from current block to candidate block
@@ -43,23 +44,49 @@ vector<vector<MotionVector>> logarithmicSearchCPUNaiveGray(const ImageGray& curr
                         if (refX >= 0 && refX + blockSize <= ref.width && refY >= 0 && refY + blockSize <= ref.height) {
                             int sad = computeSAD(curr, ref, x, y, refX, refY, blockSize);
                             int dist = dx * dx + dy * dy;
-                            int bestDist = bestMV.dx * bestMV.dx + bestMV.dy * bestMV.dy;
-                            if (sad < bestSAD || (sad == bestSAD && dist < bestDist)) {
-                                bestSAD = sad;
-                                bestMV = {dx, dy};
+                            int iterDist = iterBestDX * iterBestDX + iterBestDY * iterBestDY; 
+                            if (sad < iterBestSAD || (sad == iterBestSAD && dist < iterDist)) { 
+                                iterBestSAD = sad; 
+                                iterBestDX  = dx;  
+                                iterBestDY  = dy;
                             }
                         }
                     }
                 }
                 // Update the center point for the next iteration to be the best match found in this iteration
-                cx += bestMV.dx * blockSize;
-                cy += bestMV.dy * blockSize;
+                cx += iterBestDX * blockSize;
+                cy += iterBestDY * blockSize;
             }
-            // Calculate the final motion vector from initial position to final position
-            int finalMVX = (cx - x) / blockSize;
-            int finalMVY = (cy - y) / blockSize;
-            mv[by][bx] = {finalMVX, finalMVY};
+        /* TODO local search in the pixex neighborhood of the final position found by the logarithmic search to refine the motion vector
+            it is necessary? 
+        int refBestSAD = numeric_limits<int>::max();
+        int refBestDX  = 0;
+        int refBestDY  = 0;
+        for (int dy = -(blockSize-1); dy <= (blockSize-1); dy++) {
+            for (int dx = -(blockSize-1); dx <= (blockSize-1); dx++) {
+                int refX = cx + dx;
+                int refY = cy + dy;
+                if (refX >= 0 && refX + blockSize <= ref.width &&
+                    refY >= 0 && refY + blockSize <= ref.height) {
+                    int sad  = computeSAD(curr, ref, x, y, refX, refY, blockSize);
+                    int dist     = dx * dx + dy * dy;
+                    int refDist  = refBestDX * refBestDX + refBestDY * refBestDY;
+                    if (sad < refBestSAD || (sad == refBestSAD && dist < refDist)) {
+                        refBestSAD = sad;
+                        refBestDX  = dx;
+                        refBestDY  = dy;
+                    }
+                }
+            }
         }
+        // Calculate the final motion vector from initial position to final position
+        // Return motion vector in PIXELS to be consistent with full search output
+        cx += refBestDX; 
+        cy += refBestDY;
+        */
+        mv[by][bx] = {(cx - x), (cy - y)};
+        
+    }
         // Print progress every 10 rows processed
         if((by + 1) % 10 == 0 || by == blocksY - 1) {
             auto current_time = chrono::high_resolution_clock::now();
