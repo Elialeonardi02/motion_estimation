@@ -26,8 +26,10 @@ vector<vector<MotionVector>> fullSearchCPUNaiveGray(const ImageGray& curr, const
             int bestSAD = numeric_limits<int>::max();
             MotionVector bestMV{0, 0};
             // try every possible block position in the reference frame (naive search)
-            for(int refY = 0; refY <= ref.height - blockSize; refY++) {
-                for(int refX = 0; refX <= ref.width - blockSize; refX++) {
+            for(int irefY = 0; irefY < blocksY; irefY++){
+                for(int irefX = 0; irefX < blocksX; irefX++) {
+                    int refX = irefX * blockSize;
+                    int refY = irefY * blockSize;
                     // Compute displacement (dx, dy) from current block to candidate block
                     int dx = refX - x;
                     int dy = refY - y;

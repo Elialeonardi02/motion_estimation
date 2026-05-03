@@ -45,9 +45,9 @@ __global__ void fullSearchKernel(const unsigned char* d_curr, const unsigned cha
     int y = by * blockSize;  // y coordinate of top-left corner of search block in current frame
     
     // Search space dimensions in reference frame
-    int max_ref_x = width - blockSize;          // Maximum x coordinate for top-left corner of block in reference frame (to fit blockSize)  
-    int max_ref_y = height - blockSize;         // Maximum y coordinate for top-left corner of block in reference frame (to fit blockSize)
-    int total_positions = max_ref_x * max_ref_y; // Total candidate positions in reference frame for this current search block (all possible top-left corners of blockSize in reference frame)
+    // +1 because the block can start at (width-blockSize) and still fit within the frame, so the last valid starting position is (width-blockSize), 
+    // which means there are (width-blockSize+1) valid starting positions in total (from 0 to width-blockSize inclusive).
+    int total_positions = blocksX * blocksY; // Total candidate positions in reference frame for this current search block (all possible top-left corners of blockSize in reference frame)
     
     // Thread-local best match
     int best_sad = INT_MAX; // Initialize best SAD with worst case
@@ -56,8 +56,8 @@ __global__ void fullSearchKernel(const unsigned char* d_curr, const unsigned cha
     // Each thread searches one or more positions (depending on search space size)
     if (total_positions <= total_threads) { // each thread process at most one position
         if (tidx < total_positions) { // some threads may be in idle
-            int ref_y = tidx / max_ref_x; // y coordinate of candidate block in reference frame based on linear thread index
-            int ref_x = tidx % max_ref_x; // x coordinate of candidate block in reference frame based on linear thread index    
+            int ref_y = (tidx / blocksX) * blockSize; // y coordinate of candidate block in reference frame based on linear thread index
+            int ref_x = (tidx % blocksX) * blockSize; // x coordinate of candidate block in reference frame based on linear thread index    
             best_sad = computeSAD_device(d_curr, d_ref,x , y, ref_x, ref_y, blockSize, width);
             best_dx =   ref_x - x;
             best_dy =  ref_y - y;
@@ -65,8 +65,8 @@ __global__ void fullSearchKernel(const unsigned char* d_curr, const unsigned cha
     } else {
         // Many positions: distribute work across threads
         for (int pos = tidx; pos < total_positions; pos += total_threads) {
-            int ref_y = pos / max_ref_x; // y coordinate of candidate block in reference frame based on linear thread index
-            int ref_x = pos % max_ref_x; // x coordinate of candidate block in reference frame based on linear thread index
+            int ref_y = (pos / blocksX) * blockSize; // y coordinate of candidate block in reference frame based on linear thread index
+            int ref_x = (pos % blocksX) * blockSize; // x coordinate of candidate block in reference frame based on linear thread index
             int sad = computeSAD_device(d_curr, d_ref, x, y, ref_x, ref_y, blockSize, width);
             int dist = (ref_x - x) * (ref_x - x) + (ref_y - y) * (ref_y - y);
             int best_dist = best_dx * best_dx + best_dy * best_dy;
@@ -143,12 +143,15 @@ vector<vector<MotionVector>> fullSearchCUDANaiveGray(const ImageGray& curr, cons
     MotionVector* d_mv = nullptr;   // GPU pointer matrix for motion vectors (one per block in current frame) 
     gpuErrorCheck(cudaMalloc((void**)&d_mv, mvSize));
     
-    // Calculate thread count: blockSize × blockSize (limited to max 1024 CUDA threads)
-    int threadsPerBlockDim = blockSize; // default block size is 32 
-    if (blockSize * blockSize > 1024) {
-        threadsPerBlockDim = 32;  // 32×32 = 1024 threads maximum
+    // Determine threads per block based on the grid dimension 
+    int threadsX = blocksX;
+    int threadsY = blocksY;
+    int threadsPerBlock =blocksX * blocksY;
+    if (threadsPerBlock > 1024) {
+        threadsX = 32; 
+        threadsY = 32;
+        threadsPerBlock = threadsX * threadsY;
     }
-    int threadsPerBlock = threadsPerBlockDim * threadsPerBlockDim;
     
     // Allocate GPU memory for thread results
     size_t threadResultsSize = blocksX * blocksY * threadsPerBlock * sizeof(int);
@@ -161,7 +164,7 @@ vector<vector<MotionVector>> fullSearchCUDANaiveGray(const ImageGray& curr, cons
     gpuErrorCheck(cudaMalloc((void**)&d_thread_dy, threadResultsSize)); // Each thread writes its dy result to this array
     
     dim3 gridDim(blocksX, blocksY); // One block for each search block in current frame
-    dim3 blockDim(threadsPerBlockDim, threadsPerBlockDim);  // Each block has threadsPerBlockDim × threadsPerBlockDim threads (e.g., 16×16 = 256 threads) to search reference frame positions in parallel
+    dim3 blockDim(threadsX, threadsY);  // Each block has threadsPerBlockDim × threadsPerBlockDim threads (e.g., 16×16 = 256 threads) to search reference frame positions in parallel
     
     std::cout << "CUDA: Launching kernel with " << blockDim.x << "x" << blockDim.y 
               << " threads per block (" << (blockDim.x * blockDim.y) << " total threads)..." << std::endl;
