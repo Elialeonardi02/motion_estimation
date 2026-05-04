@@ -59,8 +59,8 @@ __global__ void fullSearchKernel(const unsigned char* d_curr, const unsigned cha
             int ref_y = (tidx / blocksX) * blockSize; // y coordinate of candidate block in reference frame based on linear thread index
             int ref_x = (tidx % blocksX) * blockSize; // x coordinate of candidate block in reference frame based on linear thread index    
             best_sad = computeSAD_device(d_curr, d_ref,x , y, ref_x, ref_y, blockSize, width);
-            best_dx =   ref_x - x;
-            best_dy =  ref_y - y;
+            best_dx =   (ref_x - x) / blockSize;
+            best_dy =  (ref_y - y) / blockSize;
         }
     } else {
         // Many positions: distribute work across threads
@@ -72,8 +72,8 @@ __global__ void fullSearchKernel(const unsigned char* d_curr, const unsigned cha
             int best_dist = best_dx * best_dx + best_dy * best_dy;
             if (sad < best_sad || (sad == best_sad && dist < best_dist)) {
                 best_sad = sad;
-                best_dx =   ref_x - x;
-                best_dy =  ref_y - y;
+                best_dx =   (ref_x - x) / blockSize;
+                best_dy =  (ref_y - y) / blockSize;
             }
         }
     }

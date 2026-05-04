@@ -84,7 +84,7 @@ vector<vector<MotionVector>> logarithmicSearchCPUNaiveGray(const ImageGray& curr
         cx += refBestDX; 
         cy += refBestDY;
         */
-        mv[by][bx] = {(cx - x), (cy - y)};
+        mv[by][bx] = {(cx - x) / blockSize, (cy - y) / blockSize};
         
     }
         // Print progress every 10 rows processed

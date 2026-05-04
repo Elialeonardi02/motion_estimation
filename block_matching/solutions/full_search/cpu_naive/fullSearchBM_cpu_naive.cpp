@@ -31,8 +31,8 @@ vector<vector<MotionVector>> fullSearchCPUNaiveGray(const ImageGray& curr, const
                     int refX = irefX * blockSize;
                     int refY = irefY * blockSize;
                     // Compute displacement (dx, dy) from current block to candidate block
-                    int dx = refX - x;
-                    int dy = refY - y;
+                    int dx = (refX - x) / blockSize;
+                    int dy = (refY - y) / blockSize;
                     int sad = computeSAD(curr, ref, x, y, refX, refY, blockSize);
                     int dist     = dx * dx + dy * dy;
                     int bestDist = bestMV.dx * bestMV.dx + bestMV.dy * bestMV.dy;
@@ -83,8 +83,8 @@ vector<vector<MotionVector>> fullSearchCPUNaiveRGB(const ImageColor& curr, const
                     int refX = irefX * blockSize;
                     int refY = irefY * blockSize;
                     // Compute displacement (dx, dy) from current block to candidate block
-                    int dx = refX - x;
-                    int dy = refY - y;
+                    int dx = (refX - x) / blockSize;
+                    int dy = (refY - y) / blockSize;
                     int sad = computeSADRGB(curr, ref, x, y, refX, refY, blockSize);
                     int dist     = dx * dx + dy * dy;
                     int bestDist = bestMV.dx * bestMV.dx + bestMV.dy * bestMV.dy;

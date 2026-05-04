@@ -176,8 +176,9 @@ ImageColor drawMotionVectors(const ImageGray& frame,
     int scale = 1;
     int min_length = 0; // Draw all vectors
     int step = 1; // Draw every block
+    int cols = (mv.size() > 0) ? mv[0].size() : 0;
     for(int by = 0; by < static_cast<int>(mv.size()); by += step) {
-        for(int bx = 0; bx < static_cast<int>(mv[0].size()); bx += step) {
+        for(int bx = 0; bx < cols && bx < static_cast<int>(mv[by].size()); bx += step) {
             int dx = mv[by][bx].dx;
             int dy = mv[by][bx].dy;
             if(abs(dx) + abs(dy) < min_length) continue;
@@ -186,17 +187,15 @@ ImageColor drawMotionVectors(const ImageGray& frame,
             dx *= scale;
             dy *= scale;
             
-            // Calculate endpoint and clip to image bounds
+            // Calculate endpoint (NO clipping - let drawLine handle bounds)
             int ex = cx + dx;
             int ey = cy + dy;
-            ex = max(0, min(ex, img.width - 1));
-            ey = max(0, min(ey, img.height - 1));
             
             // Starting point (green dot)
             drawLine(img, cx, cy, cx, cy, 0, 255, 0);
-            // Red motion vector line (clipped) - only if there's movement
+            // Red motion vector line - only if there's movement
             if(abs(dx) + abs(dy) > 0) {
-                drawLine(img, ex, ey, cx, cy, 255, 0, 0);
+                drawLine(img, cx, cy, ex, ey, 255, 0, 0);
             }
             // V-shaped arrow head at starting point
             int arrow_len = 16;
@@ -250,8 +249,9 @@ ImageColor drawMotionVectorsRGB(const ImageColor& frame,
     int scale = 1;
     int min_length = 0; // Draw all vectors
     int step = 1; // Draw every block
+    int cols = (mv.size() > 0) ? mv[0].size() : 0;
     for(int by = 0; by < static_cast<int>(mv.size()); by += step) {
-        for(int bx = 0; bx < static_cast<int>(mv[0].size()); bx += step) {
+        for(int bx = 0; bx < cols && bx < static_cast<int>(mv[by].size()); bx += step) {
             int dx = mv[by][bx].dx;
             int dy = mv[by][bx].dy;
             if(abs(dx) + abs(dy) < min_length) continue;

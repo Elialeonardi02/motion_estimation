@@ -83,8 +83,8 @@ __global__ void fullSearchKernel(const unsigned char* d_curr, const unsigned cha
             int ref_x  = (tidx % blocksX) * blockSize;
             int ref_y  = (tidx / blocksX) * blockSize;  
             best_sad = computeSAD_device(s_curr, d_ref, ref_x, ref_y, blockSize, width);
-            best_dx = ref_x - x;  
-            best_dy = ref_y - y;
+            best_dx = (ref_x - x) / blockSize;  
+            best_dy = (ref_y - y) / blockSize;
         }
     } else {
         // Many positions: distribute work across threads
@@ -96,8 +96,8 @@ __global__ void fullSearchKernel(const unsigned char* d_curr, const unsigned cha
             int best_dist = best_dx * best_dx + best_dy * best_dy;
             if (sad < best_sad || (sad == best_sad && dist < best_dist)) {
                 best_sad = sad;
-                best_dx = ref_x - x;
-                best_dy = ref_y - y;
+                best_dx = (ref_x - x) / blockSize;
+                best_dy = (ref_y - y) / blockSize;
             }
         }
     }
@@ -176,17 +176,13 @@ vector<vector<MotionVector>> fullSearchCUDAOptimizedGray(const ImageGray& curr, 
     gpuErrorCheck(cudaMalloc((void**)&d_mv, mvSize));
     
     // Determine threads per block based on the grid dimension 
-    int threadsPerBlock = blocksX * blocksY;
-    if (threadsPerBlock > 1024) {
-        threadsPerBlock = 1024;
-    }
-    
-    // Determine block dimensions to match threadsPerBlock
     int threadsX = blocksX;
     int threadsY = blocksY;
+    int threadsPerBlock =blocksX * blocksY;
     if (threadsPerBlock > 1024) {
-        threadsX = 32;
+        threadsX = 32; 
         threadsY = 32;
+        threadsPerBlock = threadsX * threadsY;
     }
     
     dim3 gridDim(blocksX, blocksY); // One block for each search block in current frame
