@@ -109,19 +109,18 @@ __global__ void fullSearchKernel(const unsigned char* d_curr, const unsigned cha
 
     __syncthreads(); 
 
-    // Tree reduction: each step halves the number of active threads
-    // Thread tid reads from tid + stride and compares
-    // FIXME - this reduction assumes threadsPerBlock is a power of 2, which is true for common block sizes (e.g., 16, 32) but should be handled more robustly for arbitrary block sizes in production code
-    // FIXME - this redcution leave a lot of thread inactive in the later steps, which is not optimal, coaleshing? warp shuffle? 
-    for(int stride = threadsPerBlock / 2; stride > 0; stride /= 2) {
-        if(tidx < stride) {
+    // Parallel reduction: robust for any thread count (non-power-of-2 safe)
+    // Up-sweep phase: stride starts at 1 and doubles
+    // Each iteration, thread i compares with thread (i + stride) and keeps the better result
+    for(int stride = 1; stride < threadsPerBlock; stride *= 2) {
+        if(tidx + stride < threadsPerBlock) {
             // Thread tidx compares with thread (tidx + stride)
-            int dist = shared_block_thread_dx[tidx + stride] * shared_block_thread_dx[tidx + stride] + 
-                      shared_block_thread_dy[tidx + stride] * shared_block_thread_dy[tidx + stride];
-            int best_dist = shared_block_thread_dx[tidx] * shared_block_thread_dx[tidx] + 
-                           shared_block_thread_dy[tidx] * shared_block_thread_dy[tidx];
+            int dist_other = shared_block_thread_dx[tidx + stride] * shared_block_thread_dx[tidx + stride] + 
+                           shared_block_thread_dy[tidx + stride] * shared_block_thread_dy[tidx + stride];
+            int dist_curr = shared_block_thread_dx[tidx] * shared_block_thread_dx[tidx] + 
+                          shared_block_thread_dy[tidx] * shared_block_thread_dy[tidx];
             if(shared_block_thread_sad[tidx + stride] < shared_block_thread_sad[tidx] || 
-               (shared_block_thread_sad[tidx + stride] == shared_block_thread_sad[tidx] && dist < best_dist)) {
+               (shared_block_thread_sad[tidx + stride] == shared_block_thread_sad[tidx] && dist_other < dist_curr)) {
                 shared_block_thread_sad[tidx] = shared_block_thread_sad[tidx + stride];
                 shared_block_thread_dx[tidx] = shared_block_thread_dx[tidx + stride];
                 shared_block_thread_dy[tidx] = shared_block_thread_dy[tidx + stride];
@@ -177,13 +176,17 @@ vector<vector<MotionVector>> fullSearchCUDAOptimizedGray(const ImageGray& curr, 
     gpuErrorCheck(cudaMalloc((void**)&d_mv, mvSize));
     
     // Determine threads per block based on the grid dimension 
+    int threadsPerBlock = blocksX * blocksY;
+    if (threadsPerBlock > 1024) {
+        threadsPerBlock = 1024;
+    }
+    
+    // Determine block dimensions to match threadsPerBlock
     int threadsX = blocksX;
     int threadsY = blocksY;
-    int threadsPerBlock =blocksX * blocksY;
     if (threadsPerBlock > 1024) {
-        threadsX = 32; 
+        threadsX = 32;
         threadsY = 32;
-        threadsPerBlock = threadsX * threadsY;
     }
     
     dim3 gridDim(blocksX, blocksY); // One block for each search block in current frame
