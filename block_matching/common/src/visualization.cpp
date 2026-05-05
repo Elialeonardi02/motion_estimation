@@ -132,15 +132,15 @@ void drawBlockGridWithNumbers(ImageColor& img, int blockSize) {
     
     // Draw column numbers (top)
     for(int bx = 0; bx < blocksX; bx++) {
-        int block_num = bx + 1;
+        int block_num = bx;
         int cx = bx * blockSize + blockSize / 2 - 10;
         int cy = 2;
         drawNumber(img, cx, cy, block_num, 200, 200, 200);
     }
     
-    // Draw row numbers on the left (1, 2, 3, ...)
+    // Draw row numbers on the left (0, 1, 2, ...)
     for(int by = 0; by < blocksY; by++) {
-        int block_num = by + 1;
+        int block_num = by;
         int cx = 2;
         int cy = by * blockSize + blockSize / 2 - 3;
         drawNumber(img, cx, cy, block_num, 200, 200, 200);
@@ -172,8 +172,7 @@ ImageColor drawMotionVectors(const ImageGray& frame,
     // Draw block-aligned grid with numbers (before vectors, so arrows render on top)
     drawBlockGridWithNumbers(img, blockSize);
 
-    // Draw motion vectors (amplified, significant only, every 5 blocks)
-    int scale = 1;
+    // Draw motion vectors (from reference block to current block)
     int min_length = 0; // Draw all vectors
     int step = 1; // Draw every block
     int cols = (mv.size() > 0) ? mv[0].size() : 0;
@@ -182,27 +181,29 @@ ImageColor drawMotionVectors(const ImageGray& frame,
             int dx = mv[by][bx].dx;
             int dy = mv[by][bx].dy;
             if(abs(dx) + abs(dy) < min_length) continue;
+            
+            // Current block center in pixels
             int cx = bx * blockSize + blockSize / 2;
             int cy = by * blockSize + blockSize / 2;
-            dx *= scale;
-            dy *= scale;
             
-            // Calculate endpoint (NO clipping - let drawLine handle bounds)
-            int ex = cx + dx;
-            int ey = cy + dy;
+            // Reference block position and center in pixels
+            int ref_bx = bx + dx;
+            int ref_by = by + dy;
+            int ref_cx = ref_bx * blockSize + blockSize / 2;
+            int ref_cy = ref_by * blockSize + blockSize / 2;
             
-            // Starting point (green dot)
-            drawLine(img, cx, cy, cx, cy, 0, 255, 0);
-            // Red motion vector line - only if there's movement
+            // Starting point (green dot at reference block)
+            drawLine(img, ref_cx, ref_cy, ref_cx, ref_cy, 0, 255, 0);
+            // Red motion vector line from reference to current
             if(abs(dx) + abs(dy) > 0) {
-                drawLine(img, cx, cy, ex, ey, 255, 0, 0);
+                drawLine(img, ref_cx, ref_cy, cx, cy, 255, 0, 0);
             }
-            // V-shaped arrow head at starting point
-            int arrow_len = 16;
-            float len = sqrt((float)((ex - cx) * (ex - cx) + (ey - cy) * (ey - cy)));
+            // V-shaped arrow head at current block position
+            int arrow_len = 10;
+            float len = sqrt((float)((cx - ref_cx) * (cx - ref_cx) + (cy - ref_cy) * (cy - ref_cy)));
             if(len > 0) {
-                float nx = -(ex - cx) / len;
-                float ny = -(ey - cy) / len;
+                float nx = (cx - ref_cx) / len;
+                float ny = (cy - ref_cy) / len;
                 // Back center point
                 int back_x = cx - arrow_len * nx;
                 int back_y = cy - arrow_len * ny;
@@ -215,6 +216,8 @@ ImageColor drawMotionVectors(const ImageGray& frame,
                 int py2 = back_y - arrow_len * nx / 2;
                 drawLine(img, cx, cy, px2, py2, 255, 255, 255);
             }
+            // Ending point (white dot at current block)
+            drawLine(img, cx, cy, cx, cy, 255, 255, 255);
         }
     }
     return img;
@@ -245,8 +248,7 @@ ImageColor drawMotionVectorsRGB(const ImageColor& frame,
     // Draw block-aligned grid with numbers (before vectors, so arrows render on top)
     drawBlockGridWithNumbers(img, blockSize);
 
-    // Draw motion vectors 
-    int scale = 1;
+    // Draw motion vectors (from reference block to current block)
     int min_length = 0; // Draw all vectors
     int step = 1; // Draw every block
     int cols = (mv.size() > 0) ? mv[0].size() : 0;
@@ -255,29 +257,29 @@ ImageColor drawMotionVectorsRGB(const ImageColor& frame,
             int dx = mv[by][bx].dx;
             int dy = mv[by][bx].dy;
             if(abs(dx) + abs(dy) < min_length) continue;
+            
+            // Current block center in pixels
             int cx = bx * blockSize + blockSize / 2;
             int cy = by * blockSize + blockSize / 2;
-            dx *= scale;
-            dy *= scale;
             
-            // Calculate endpoint and clip to image bounds
-            int ex = cx + dx;
-            int ey = cy + dy;
-            ex = max(0, min(ex, img.width - 1));
-            ey = max(0, min(ey, img.height - 1));
+            // Reference block position and center in pixels
+            int ref_bx = bx + dx;
+            int ref_by = by + dy;
+            int ref_cx = ref_bx * blockSize + blockSize / 2;
+            int ref_cy = ref_by * blockSize + blockSize / 2;
             
-            // Starting point (green dot)
-            drawLine(img, cx, cy, cx, cy, 0, 255, 0);
-            // Red motion vector line (clipped) - only if there's movement
+            // Starting point (green dot at reference block)
+            drawLine(img, ref_cx, ref_cy, ref_cx, ref_cy, 0, 255, 0);
+            // Red motion vector line from reference to current
             if(abs(dx) + abs(dy) > 0) {
-                drawLine(img, ex, ey, cx, cy, 255, 0, 0);
+                drawLine(img, ref_cx, ref_cy, cx, cy, 255, 0, 0);
             }
-            // V-shaped arrow head at starting point
-            int arrow_len = 16;
-            float len = sqrt((float)((ex - cx) * (ex - cx) + (ey - cy) * (ey - cy)));
+            // V-shaped arrow head at current block position
+            int arrow_len = 10;
+            float len = sqrt((float)((cx - ref_cx) * (cx - ref_cx) + (cy - ref_cy) * (cy - ref_cy)));
             if(len > 0) {
-                float nx = -(ex - cx) / len;
-                float ny = -(ey - cy) / len;
+                float nx = (cx - ref_cx) / len;
+                float ny = (cy - ref_cy) / len;
                 // Back center point
                 int back_x = cx - arrow_len * nx;
                 int back_y = cy - arrow_len * ny;
@@ -290,7 +292,7 @@ ImageColor drawMotionVectorsRGB(const ImageColor& frame,
                 int py2 = back_y - arrow_len * nx / 2;
                 drawLine(img, cx, cy, px2, py2, 255, 255, 255);
             }
-            // Ending point (white dot)
+            // Ending point (white dot at current block)
             drawLine(img, cx, cy, cx, cy, 255, 255, 255);
         }
     }
