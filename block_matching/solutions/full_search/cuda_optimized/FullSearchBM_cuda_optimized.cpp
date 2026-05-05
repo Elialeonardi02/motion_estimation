@@ -29,7 +29,6 @@ __global__ void fullSearchKernel(const unsigned char* d_curr, const unsigned cha
                                  MotionVector* d_mv, int blockSize,
                                  int width, int height, int blocksX, int blocksY, int threadsPerBlock) {
     
-                                    // Grid block index (one per search block in current frame)
     int bx = blockIdx.x; // Block index in x direction (search block column)
     int by = blockIdx.y; // Block index in y direction (search block row)
     
@@ -57,23 +56,26 @@ __global__ void fullSearchKernel(const unsigned char* d_curr, const unsigned cha
     extern __shared__ int shared_memory[]; // Single shared memory buffer
 
     // FIXME ensure shared memory is large enough
-    unsigned char* s_curr = (unsigned char*)shared_memory;
+    unsigned char* s_curr = (unsigned char*)shared_memory; // First part of shared memory for current block (blockSize*blockSize bytes)
     
-    // TODO padding is necessary ? ((threadsPerBlock+3)/4)*4
-    
-    // Divide shared memory into 3 arrays with manual offset calculation
+    // padding for alling shared memory access, to avoid bank conflicts
+    // FIXME may wastes some shared memory, but it can significantly improve the performace
+    int padded_stride = total_positions+1; 
+    // Divide shared memory into 4 arrays with manual offset calculation
     int* shared_block_thread_sad = (int*)(s_curr + blockSize * blockSize); 
-    int* shared_block_thread_dx  = shared_block_thread_sad + threadsPerBlock;
-    int* shared_block_thread_dy  = shared_block_thread_dx  + threadsPerBlock;
+    int* shared_block_thread_dx  = shared_block_thread_sad + padded_stride;
+    int* shared_block_thread_dy  = shared_block_thread_dx  + padded_stride;
+    int* shared_block_thread_dist = shared_block_thread_dy + padded_stride;  // Precalculated distances
     
     // load corrent block in current frame in shared memory,
     // each thread load one pixel of the current block,
-    // thread tidx> thread per block may be idle
+    // FIXME thread "tidx> thread per block" may be idle
     for (int i = tidx; i < blockSize * blockSize; i += threadsPerBlock) {
         int py = i / blockSize;
         int px = i % blockSize;
         s_curr[i] = d_curr[(y + py) * width + (x + px)];
     }
+    // when there is
 
     __syncthreads(); 
     
@@ -107,23 +109,28 @@ __global__ void fullSearchKernel(const unsigned char* d_curr, const unsigned cha
     shared_block_thread_dx[tidx] = best_dx;
     shared_block_thread_dy[tidx] = best_dy;
 
-    __syncthreads(); 
+    __syncthreads();
+    
+    // Precalculate distances once to avoid redundant calculations in the reduction loop
+    if(tidx < threadsPerBlock) {
+        shared_block_thread_dist[tidx] = shared_block_thread_dx[tidx] * shared_block_thread_dx[tidx] + 
+                                          shared_block_thread_dy[tidx] * shared_block_thread_dy[tidx];
+    }
+    __syncthreads();
 
     // Parallel reduction: robust for any thread count (non-power-of-2 safe)
     // Up-sweep phase: stride starts at 1 and doubles
     // Each iteration, thread i compares with thread (i + stride) and keeps the better result
     for(int stride = 1; stride < threadsPerBlock; stride *= 2) {
         if(tidx + stride < threadsPerBlock) {
-            // Thread tidx compares with thread (tidx + stride)
-            int dist_other = shared_block_thread_dx[tidx + stride] * shared_block_thread_dx[tidx + stride] + 
-                           shared_block_thread_dy[tidx + stride] * shared_block_thread_dy[tidx + stride];
-            int dist_curr = shared_block_thread_dx[tidx] * shared_block_thread_dx[tidx] + 
-                          shared_block_thread_dy[tidx] * shared_block_thread_dy[tidx];
+            // Use precalculated distances instead of computing them in each iteration
             if(shared_block_thread_sad[tidx + stride] < shared_block_thread_sad[tidx] || 
-               (shared_block_thread_sad[tidx + stride] == shared_block_thread_sad[tidx] && dist_other < dist_curr)) {
+               (shared_block_thread_sad[tidx + stride] == shared_block_thread_sad[tidx] && 
+                shared_block_thread_dist[tidx + stride] < shared_block_thread_dist[tidx])) {
                 shared_block_thread_sad[tidx] = shared_block_thread_sad[tidx + stride];
                 shared_block_thread_dx[tidx] = shared_block_thread_dx[tidx + stride];
                 shared_block_thread_dy[tidx] = shared_block_thread_dy[tidx + stride];
+                shared_block_thread_dist[tidx] = shared_block_thread_dist[tidx + stride];
             }
         }
         __syncthreads();
@@ -197,8 +204,9 @@ vector<vector<MotionVector>> fullSearchCUDAOptimizedGray(const ImageGray& curr, 
     createCudaEvent(stop);
     recordCudaEvent(start);
     
-    // Allocate shared memory: total_threads * 3 arrays * sizeof(int)  bytes per block + current block syze in bytes 
-    size_t sharedMemSize = threadsPerBlock * 3 * sizeof(int)+ sizeof(unsigned char) * ((blockSize*blockSize+3)/4)*4; //  TODO is padding necessary? ((threadsPerBlock+3)/4)*4
+    // Allocate shared memory: total_threads * 4 arrays * sizeof(int) bytes per block + current block size in bytes
+    // 4 arrays: SAD, dx, dy, dist (precalculated distances) + padding for bank conflicts
+    size_t sharedMemSize = (blocksX * blocksY + 1) * 4 * sizeof(int) + sizeof(unsigned char) * (blockSize * blockSize);
     fullSearchKernel<<<gridDim, blockDim, sharedMemSize>>>(d_curr, d_ref, d_mv, blockSize,
                                             curr.width, curr.height, blocksX, blocksY, threadsPerBlock);
     gpuErrorCheck(cudaGetLastError());
