@@ -7,7 +7,7 @@
 
 using namespace std;
 
-// Full Search Block Matching (FSBM) for grayscale images
+// Full Search Block Matching for grayscale images
 vector<vector<MotionVector>> fullSearchCPUNaiveGray(const ImageGray& curr, const ImageGray& ref,
                                                      int blockSize) {
     // Grid of blocks: blocksX = ⌊width / blockSize⌋, blocksY = ⌊height / blockSize⌋
@@ -34,9 +34,8 @@ vector<vector<MotionVector>> fullSearchCPUNaiveGray(const ImageGray& curr, const
                     int dx = (refX - x) / blockSize;
                     int dy = (refY - y) / blockSize;
                     int sad = computeSAD(curr, ref, x, y, refX, refY, blockSize);
-                    int dist     = dx * dx + dy * dy;
+                    int dist = dx * dx + dy * dy;
                     int bestDist = bestMV.dx * bestMV.dx + bestMV.dy * bestMV.dy;
-
                     if (sad < bestSAD || (sad == bestSAD && dist < bestDist)) {
                         bestSAD = sad;
                         bestMV = {dx, dy};
@@ -45,7 +44,7 @@ vector<vector<MotionVector>> fullSearchCPUNaiveGray(const ImageGray& curr, const
             }
             mv[by][bx] = bestMV;
         }
-        // Print progress every 10 rows processed
+        // Progress every 10 rows
         if((by + 1) % 10 == 0 || by == blocksY - 1) {
             auto current_time = chrono::high_resolution_clock::now();
             chrono::duration<double> elapsed = current_time - start_time;
@@ -60,6 +59,8 @@ vector<vector<MotionVector>> fullSearchCPUNaiveGray(const ImageGray& curr, const
     cout << "CPU Naive (Grayscale): Total processing time: " << total_time.count() << " s" << endl;
     return mv;
 }
+
+// Full Search Block Matching for RGB color images
 vector<vector<MotionVector>> fullSearchCPUNaiveRGB(const ImageColor& curr, const ImageColor& ref,
                                                     int blockSize) {
     // Grid of blocks: blocksX = ⌊width / blockSize⌋, blocksY = ⌊height / blockSize⌋
@@ -86,7 +87,7 @@ vector<vector<MotionVector>> fullSearchCPUNaiveRGB(const ImageColor& curr, const
                     int dx = (refX - x) / blockSize;
                     int dy = (refY - y) / blockSize;
                     int sad = computeSADRGB(curr, ref, x, y, refX, refY, blockSize);
-                    int dist     = dx * dx + dy * dy;
+                    int dist = dx * dx + dy * dy;
                     int bestDist = bestMV.dx * bestMV.dx + bestMV.dy * bestMV.dy;
                     // Keep track of motion vector with minimum SAD (best match)
                     if (sad < bestSAD || (sad == bestSAD && dist < bestDist)) {
@@ -97,7 +98,7 @@ vector<vector<MotionVector>> fullSearchCPUNaiveRGB(const ImageColor& curr, const
             }
             mv[by][bx] = bestMV;
         }
-        // Print progress every 10 rows processed
+        // Progress every 10 rows
         if((by + 1) % 10 == 0 || by == blocksY - 1) {
             auto current_time = chrono::high_resolution_clock::now();
             chrono::duration<double> elapsed = current_time - start_time;

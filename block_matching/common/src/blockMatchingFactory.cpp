@@ -4,17 +4,16 @@
 #include <stdexcept>
 #include <iostream>
 
-// Forward declarations for CPU implementation
+// CPU implementations
 std::vector<std::vector<MotionVector>> fullSearchCPUNaiveGray(const ImageGray& curr, const ImageGray& ref,
                                                                int blockSize);
 std::vector<std::vector<MotionVector>> fullSearchCPUNaiveRGB(const ImageColor& curr, const ImageColor& ref,
                                                               int blockSize);
 
-// Logarithmic search CPU naive declarations
+// Logarithmic search CPU implementation
 std::vector<std::vector<MotionVector>> logarithmicSearchCPUNaiveGray(const ImageGray& curr, const ImageGray& ref,
                                                                       int blockSize, int distance);
 
-// CUDA function declarations - only for grayscale
 #ifndef NO_CUDA
 extern std::vector<std::vector<MotionVector>> fullSearchCUDANaiveGray(
     const ImageGray& curr, 
@@ -27,7 +26,6 @@ extern std::vector<std::vector<MotionVector>> fullSearchCUDAOptimizedGray(
     int blockSize);
 #endif
 
-// CPU implementation wrapper
 class FullSearchBlockMatcher : public BlockMatcher {
 public:
     std::vector<std::vector<MotionVector>> matchGray(
@@ -46,7 +44,6 @@ public:
 };
 
 #ifndef NO_CUDA
-// CUDA Naive implementation wrapper - grayscale only
 class FullSearchBlockMatcherCUDA : public BlockMatcher {
 public:
     std::vector<std::vector<MotionVector>> matchGray(
@@ -64,7 +61,6 @@ public:
     }
 };
 
-// CUDA Optimized implementation wrapper - grayscale only
 class FullSearchBlockMatcherCUDAOptimized : public BlockMatcher {
 public:
     std::vector<std::vector<MotionVector>> matchGray(

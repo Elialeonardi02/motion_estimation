@@ -14,28 +14,23 @@
 using namespace std;
 
 int main(int argc, char* argv[]) {
-    // Default parameters for input frames, output, and processing.
+    // Default parameters
     string format = "pgm";
     int width = 0, height = 0;
     bool isColor = false;
     int blockSize = 32;
-    int distance = 32;  // Default search distance for logarithmic search
+    int distance = 32;
 
-    
-    // Block matching algorithm and implementation selection
     string algorithm = "full_search";
     string implementation = "cpu_naive";
 
-    // range-based input parameters
     string input_dir = "";
     string range_prefix = "";
     string range_suffix = "";
     int range_start = 0, range_end = 0;
-    
-    // individual image paths based input parameters
+
     vector<string> image_paths;
 
-    // Parse command-line arguments
     for(int i = 1; i < argc; ++i) {
         string arg = argv[i];
         if(arg == "--algorithm") {
@@ -111,7 +106,6 @@ int main(int argc, char* argv[]) {
         }
     }
 
-    // generate file paths based on the provided prefix, suffix, and range (if -- range is specified)
     if(!range_prefix.empty()) {
         if(input_dir.empty()) {
             cerr << "Error: --range requires --input-dir" << endl;
@@ -125,7 +119,6 @@ int main(int argc, char* argv[]) {
         }
     }
 
-    // Motion estimation works on consecutive pairs, so we need at least two images.
     if(image_paths.size() < 2) {
         cerr << "Usage: " << argv[0]
              << " [--algorithm <algorithm>] [--implementation <impl>]"
@@ -142,21 +135,17 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    // Raw format requires --width and --height to be specified.
     if(format == "raw" && (width <= 0 || height <= 0)) {
         cerr << "Error: For RAW format, valid --width and --height must be specified." << endl;
         return 1;
     }
 
-    // Determine output directory with subdirectory based on input folder and algorithm/implementation
     string output_base = "output";
     string sub_dir = "";
-    
-    // Extract directory name from input path
+
     if(!input_dir.empty()) {
         sub_dir = getLastDirName(input_dir);
     } else if(!image_paths.empty()) {
-        // Extract directory from first file path
         string first_path = image_paths[0];
         size_t pos = first_path.rfind('/');
         if(pos == string::npos) pos = first_path.rfind('\\');
@@ -172,7 +161,6 @@ int main(int argc, char* argv[]) {
         }
     }
     
-    // Create output directory with algorithm_implementation subdirectory
     string algorithm_impl = algorithm + "_" + implementation;
     string output_dir = output_base + "/" + algorithm_impl;
     if(!sub_dir.empty()) {
@@ -190,7 +178,6 @@ int main(int argc, char* argv[]) {
     cout << "  Search mode: Full frame (naive)" << endl;
     cout << "  Output directory: " << output_dir << endl << endl;
 
-    // Create block matcher
     unique_ptr<BlockMatcher> matcher;
     try {
         matcher = createBlockMatcher(algorithm, implementation);
@@ -199,12 +186,10 @@ int main(int argc, char* argv[]) {
         return 1;
     }
     
-    // Set algorithm-specific parameters
     matcher->setDistance(distance);
 
     bool isRange = !range_prefix.empty();
 
-    // Process consecutive image pairs
     for(size_t i = 0; i < image_paths.size() - 1; ++i) {
         string ref_path = image_paths[i];
         string curr_path = image_paths[i + 1];

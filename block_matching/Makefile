@@ -1,6 +1,3 @@
-# Author: Gabriele Mencagli
-# Modified for block matching with CUDA support
-
 NVXX            = nvcc
 NVXXFLAGS       = -std=c++17 -x cu -Xcompiler -fPIE
 NVOPTFLAGS      = -w -O3 --gpu-architecture=compute_80 --gpu-code=sm_80
@@ -17,7 +14,6 @@ INCLUDE_DIRS    = -Icommon/include \
 
 # Directory structure
 COMMON_SRC      = common/src
-FSEARCH_SRC     = full_search
 FSEARCH_CPU_SRC = solutions/full_search/cpu_naive
 FSEARCH_CUDA_SRC = solutions/full_search/cuda_naive
 FSEARCH_CUDA_OPTIMIZED_SRC = solutions/full_search/cuda_optimized
@@ -54,14 +50,13 @@ else
   $(warning nvcc not found. Building CPU-only version.)
 endif
 
-# Default target
+# Build targets
 all: $(EXECUTABLE)
 
-# Create build directory
 $(BUILD_DIR):
 	@mkdir -p $@
 
-# Compile common object files with g++
+# Compile common C++ files with g++
 $(BUILD_DIR)/main.o: $(COMMON_SRC)/main.cpp | $(BUILD_DIR)
 	g++ $(CXXFLAGS) $(INCLUDE_DIRS) -c $< -o $@
 
@@ -77,42 +72,39 @@ $(BUILD_DIR)/utils.o: $(COMMON_SRC)/utils.cpp | $(BUILD_DIR)
 $(BUILD_DIR)/blockMatchingFactory.o: $(COMMON_SRC)/blockMatchingFactory.cpp | $(BUILD_DIR)
 	g++ $(CXXFLAGS) $(INCLUDE_DIRS) -c $< -o $@
 
-# Compile fullSearchBM_cpu_naive.cpp with g++
+# Compile CPU implementations with g++
 $(BUILD_DIR)/fullSearchBM_cpu_naive.o: $(FSEARCH_CPU_SRC)/fullSearchBM_cpu_naive.cpp | $(BUILD_DIR)
 	g++ $(CXXFLAGS) $(INCLUDE_DIRS) -c $< -o $@
 
-# Compile logarithmicSearchBM_cpu_naive.cpp with g++
 $(BUILD_DIR)/logarithmicSearchBM_cpu_naive.o: $(LSEARCH_CPU_SRC)/logarithmicSearchBM_cpu_naive.cpp | $(BUILD_DIR)
 	g++ $(CXXFLAGS) $(INCLUDE_DIRS) -c $< -o $@
 
-# Compile FullSearchBM_cuda_naive.cpp with nvcc (only if CUDA is available)
+# Compile CUDA kernels with nvcc (only if available)
 ifdef HAVE_CUDA
 $(BUILD_DIR)/FullSearchBM_cuda_naive.o: $(FSEARCH_CUDA_SRC)/FullSearchBM_cuda_naive.cpp | $(BUILD_DIR)
 	$(NVXX) $(NVXXFLAGS) $(NVOPTFLAGS) $(INCLUDE_DIRS) $< -c -o $@
 
-# Compile FullSearchBM_cuda_optimized.cpp with nvcc (only if CUDA is available)
 $(BUILD_DIR)/FullSearchBM_cuda_optimized.o: $(FSEARCH_CUDA_OPTIMIZED_SRC)/FullSearchBM_cuda_optimized.cpp | $(BUILD_DIR)
 	$(NVXX) $(NVXXFLAGS) $(NVOPTFLAGS) $(INCLUDE_DIRS) $< -c -o $@
 endif
 
-# Link executable (use nvcc if available, otherwise g++)
+# Link executable
 ifdef HAVE_CUDA
   $(EXECUTABLE): $(ALL_OBJECTS)
 	$(NVXX) -Xcompiler -fPIE $(ALL_OBJECTS) -o $@
-	@echo "Build complete! Executable: $(EXECUTABLE)"
+	@echo "Build complete: $(EXECUTABLE)"
 else
   $(EXECUTABLE): $(ALL_OBJECTS)
 	g++ $(CXXFLAGS) $(ALL_OBJECTS) -o $@
-	@echo "Build complete! Executable: $(EXECUTABLE) (CPU-only)"
+	@echo "Build complete: $(EXECUTABLE) (CPU-only)"
 endif
 
-# Clean build artifacts
+# Cleanup targets
 clean:
 	@rm -f $(EXECUTABLE)
 	@rm -rf $(BUILD_DIR)
 	@echo "Clean complete!"
 
-# Clean everything including output
 clean-all: clean
 	@rm -rf $(OUTPUT_DIR)
 	@echo "All cleaned!"

@@ -7,7 +7,7 @@
 
 using namespace std;
 
-// Logarithmic Search Block Matching (LSBM) for grayscale images
+// Logarithmic search block matching for grayscale images
 vector<vector<MotionVector>> logarithmicSearchCPUNaiveGray(const ImageGray& curr, const ImageGray& ref,
                                                            int blockSize, int distance) {
     // Grid of blocks: blocksX = ⌊width / blockSize⌋, blocksY = ⌊height / blockSize⌋
@@ -25,7 +25,7 @@ vector<vector<MotionVector>> logarithmicSearchCPUNaiveGray(const ImageGray& curr
             int y = by * blockSize;
             int cx = x;
             int cy = y;
-            // Logarithmic search: start with the initial distance and keep halving it until it becomes 0
+            // Logarithmic search: start with the initial distance and keep halving it until it becomes 1
             for (int currentDistance = distance; currentDistance > 0; currentDistance /= 2) {
                 // Check the 8 points around the block in the current frame at the current distance 
                 // plus the center point (0,0) which is the current block position in the reference frame
