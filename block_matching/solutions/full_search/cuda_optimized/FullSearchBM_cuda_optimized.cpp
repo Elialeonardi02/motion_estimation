@@ -210,20 +210,21 @@ vector<vector<MotionVector>> fullSearchCUDAOptimizedGray(const ImageGray& curr, 
     cudaDeviceProp prop;
     cudaGetDeviceProperties(&prop, 0);
     int maxThreadsPerBlock = prop.maxThreadsPerBlock;
-
-    int threadsPerBlockDimXY = blockSize;
-    int threadsPerBlockDimZ;
-    if (blockSize * blockSize <= maxThreadsPerBlock) {
-        threadsPerBlockDimZ = min(64, maxThreadsPerBlock / (blockSize * blockSize));
+    int threadsPerBlockX= blocksX;
+    int threadsPerBlockY = blocksY;
+    int threadsPerBlockZ;
+    if (threadsPerBlockX * threadsPerBlockY <= maxThreadsPerBlock) {
+        threadsPerBlockZ = min(64, maxThreadsPerBlock / (threadsPerBlockX * threadsPerBlockY)); // Use Z dimension for SAD parallelization, up to 64 threads (typical warp size) or as many as possible within max threads per block
     } else {
         // FIXME review dimensions for large blocks to bnetter optimization
-        threadsPerBlockDimXY = 16;
-        threadsPerBlockDimZ = 4;
+        threadsPerBlockX = 16;
+        threadsPerBlockY = 16;
+        threadsPerBlockZ = 4;
     }
-    int threadsPerBlock = threadsPerBlockDimXY * threadsPerBlockDimXY * threadsPerBlockDimZ;
+    int threadsPerBlock = threadsPerBlockX * threadsPerBlockY * threadsPerBlockZ;
 
     dim3 gridDim(blocksX, blocksY);
-    dim3 blockDim(threadsPerBlockDimXY, threadsPerBlockDimXY, threadsPerBlockDimZ);
+    dim3 blockDim(threadsPerBlockX, threadsPerBlockY, threadsPerBlockZ);
     
     std::cout << "CUDA: Launching kernel with " << blockDim.x << "x" << blockDim.y << "x" << blockDim.z
               << " threads per block (" << threadsPerBlock << " total threads)..." << std::endl;

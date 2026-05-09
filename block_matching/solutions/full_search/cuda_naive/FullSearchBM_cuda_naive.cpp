@@ -135,10 +135,13 @@ vector<vector<MotionVector>> fullSearchCUDANaiveGray(const ImageGray& curr, cons
     gpuErrorCheck(cudaMalloc((void**)&d_mv, mvSize));
     
     // Determine threads per block (max 1024 threads per block on typical GPUs)
-    int threadsPerBlockDim = blockSize;
-    int threadsPerBlock = threadsPerBlockDim * threadsPerBlockDim;
+    
+    int threadsPerBlockX = blocksX;
+    int threadsPerBlockY = blocksY;
+    int threadsPerBlock = threadsPerBlockX * threadsPerBlockY;
     if (threadsPerBlock > 1024) {
-        threadsPerBlockDim = 32;
+        threadsPerBlockX = 32;
+        threadsPerBlockY = 32;
         threadsPerBlock = 1024;
     }
     
@@ -153,7 +156,7 @@ vector<vector<MotionVector>> fullSearchCUDANaiveGray(const ImageGray& curr, cons
     gpuErrorCheck(cudaMalloc((void**)&d_thread_dy, threadResultsSize)); // Each thread writes its dy result to this array
     
     dim3 gridDim(blocksX, blocksY); // One block for each search block in current frame
-    dim3 blockDim(threadsPerBlockDim, threadsPerBlockDim);  // Each block has threadsPerBlockDim × threadsPerBlockDim threads 
+    dim3 blockDim(threadsPerBlockX, threadsPerBlockY);  // Each block has threadsPerBlockX × threadsPerBlockY threads 
     
     std::cout << "CUDA: Launching kernel with " << blockDim.x << "x" << blockDim.y 
               << " threads per block (" << (blockDim.x * blockDim.y) << " total threads)..." << std::endl;
