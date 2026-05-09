@@ -9,6 +9,7 @@ INCLUDE_DIRS    = -Icommon/include \
                   -Isolutions/full_search/cpu_naive \
                   -Isolutions/full_search/cuda_naive \
                   -Isolutions/full_search/cuda_optimized \
+			      -Isolutions/full_search/cuda_uncoalesced_optimized \
 				  -Isolutions/logarithmic_search/include \
 				  -Isolutions/logarithmic_search/cpu_naive
 
@@ -17,6 +18,7 @@ COMMON_SRC      = common/src
 FSEARCH_CPU_SRC = solutions/full_search/cpu_naive
 FSEARCH_CUDA_SRC = solutions/full_search/cuda_naive
 FSEARCH_CUDA_OPTIMIZED_SRC = solutions/full_search/cuda_optimized
+FSEARCH_CUDA_UNCOALESCED_OPTIMIZED_SRC = solutions/full_search/cuda_uncoalesced_optimized
 LSEARCH_CPU_SRC = solutions/logarithmic_search/cpu_naive
 BUILD_DIR       = build
 OUTPUT_DIR      = output
@@ -36,7 +38,8 @@ FSEARCH_OBJECTS = $(BUILD_DIR)/fullSearchBM_cpu_naive.o
 LSEARCH_CPU_OBJECTS = $(BUILD_DIR)/logarithmicSearchBM_cpu_naive.o
 
 FSEARCH_CUDA_OBJECTS = $(BUILD_DIR)/FullSearchBM_cuda_naive.o \
-                       $(BUILD_DIR)/FullSearchBM_cuda_optimized.o
+					   $(BUILD_DIR)/FullSearchBM_cuda_optimized.o \
+					   $(BUILD_DIR)/FullSearchBM_cuda_uncoalesced_optimized.o
 
 
 # Check if nvcc is available
@@ -85,6 +88,9 @@ $(BUILD_DIR)/FullSearchBM_cuda_naive.o: $(FSEARCH_CUDA_SRC)/FullSearchBM_cuda_na
 	$(NVXX) $(NVXXFLAGS) $(NVOPTFLAGS) $(INCLUDE_DIRS) $< -c -o $@
 
 $(BUILD_DIR)/FullSearchBM_cuda_optimized.o: $(FSEARCH_CUDA_OPTIMIZED_SRC)/FullSearchBM_cuda_optimized.cpp | $(BUILD_DIR)
+	$(NVXX) $(NVXXFLAGS) $(NVOPTFLAGS) $(INCLUDE_DIRS) $< -c -o $@
+
+$(BUILD_DIR)/FullSearchBM_cuda_uncoalesced_optimized.o: $(FSEARCH_CUDA_UNCOALESCED_OPTIMIZED_SRC)/FullSearchBM_cuda_optimized.cpp | $(BUILD_DIR)
 	$(NVXX) $(NVXXFLAGS) $(NVOPTFLAGS) $(INCLUDE_DIRS) $< -c -o $@
 endif
 

@@ -24,6 +24,11 @@ extern std::vector<std::vector<MotionVector>> fullSearchCUDAOptimizedGray(
     const ImageGray& curr, 
     const ImageGray& ref,
     int blockSize);
+
+extern std::vector<std::vector<MotionVector>> fullSearchCUDAUncoalescedOptimizedGray(
+    const ImageGray& curr,
+    const ImageGray& ref,
+    int blockSize);
 #endif
 
 class FullSearchBlockMatcher : public BlockMatcher {
@@ -77,6 +82,23 @@ public:
         throw std::runtime_error("CUDA RGB implementation not available");
     }
 };
+
+class FullSearchBlockMatcherCUDAUncoalescedOptimized : public BlockMatcher {
+public:
+    std::vector<std::vector<MotionVector>> matchGray(
+        const ImageGray& curr,
+        const ImageGray& ref,
+        int blockSize) override {
+        return fullSearchCUDAUncoalescedOptimizedGray(curr, ref, blockSize);
+    }
+
+    std::vector<std::vector<MotionVector>> matchRGB(
+        const ImageColor&,
+        const ImageColor&,
+        int) override {
+        throw std::runtime_error("CUDA RGB implementation not available");
+    }
+};
 #else
 // Stub implementations when CUDA is not available
 class FullSearchBlockMatcherCUDA : public BlockMatcher {
@@ -105,6 +127,23 @@ public:
         throw std::runtime_error("CUDA support is not available. Compile with CUDA support enabled.");
     }
     
+    std::vector<std::vector<MotionVector>> matchRGB(
+        const ImageColor&, 
+        const ImageColor&,
+        int) override {
+        throw std::runtime_error("CUDA support is not available");
+    }
+};
+
+class FullSearchBlockMatcherCUDAUncoalescedOptimized : public BlockMatcher {
+public:
+    std::vector<std::vector<MotionVector>> matchGray(
+        const ImageGray&, 
+        const ImageGray&,
+        int) override {
+        throw std::runtime_error("CUDA support is not available. Compile with CUDA support enabled.");
+    }
+
     std::vector<std::vector<MotionVector>> matchRGB(
         const ImageColor&, 
         const ImageColor&,
@@ -150,6 +189,8 @@ std::unique_ptr<BlockMatcher> createBlockMatcher(
             return std::make_unique<FullSearchBlockMatcherCUDA>();
         } else if(implementation == "cuda_optimized") {
             return std::make_unique<FullSearchBlockMatcherCUDAOptimized>();
+        } else if(implementation == "cuda_uncoalesced_optimized") {
+            return std::make_unique<FullSearchBlockMatcherCUDAUncoalescedOptimized>();
         } else {
             throw std::runtime_error("Unknown implementation '" + implementation + "' for algorithm '" + algorithm + "'");
         }
