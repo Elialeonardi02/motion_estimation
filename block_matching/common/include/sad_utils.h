@@ -11,7 +11,7 @@ static inline int computeSAD(const ImageGray& curr, const ImageGray& ref,
     int sad = 0;
     for(int y = 0; y < blockSize; y++) {
         for(int x = 0; x < blockSize; x++) {
-            sad += std::abs(curr.at(x1 + x, y1 + y)) -(ref.at(x2 + x, y2 + y)); 
+            sad += std::abs(curr.at(x1 + x, y1 + y) - ref.at(x2 + x, y2 + y)); 
         }
     }
     return sad;

@@ -90,7 +90,7 @@ $(BUILD_DIR)/FullSearchBM_cuda_naive.o: $(FSEARCH_CUDA_SRC)/FullSearchBM_cuda_na
 $(BUILD_DIR)/FullSearchBM_cuda_optimized.o: $(FSEARCH_CUDA_OPTIMIZED_SRC)/FullSearchBM_cuda_optimized.cpp | $(BUILD_DIR)
 	$(NVXX) $(NVXXFLAGS) $(NVOPTFLAGS) $(INCLUDE_DIRS) $< -c -o $@
 
-$(BUILD_DIR)/FullSearchBM_cuda_uncoalesced_optimized.o: $(FSEARCH_CUDA_UNCOALESCED_OPTIMIZED_SRC)/FullSearchBM_cuda_optimized.cpp | $(BUILD_DIR)
+$(BUILD_DIR)/FullSearchBM_cuda_uncoalesced_optimized.o: $(FSEARCH_CUDA_UNCOALESCED_OPTIMIZED_SRC)/FullSearchBM_cuda_uncoalesced_optimized.cpp | $(BUILD_DIR)
 	$(NVXX) $(NVXXFLAGS) $(NVOPTFLAGS) $(INCLUDE_DIRS) $< -c -o $@
 endif
 
