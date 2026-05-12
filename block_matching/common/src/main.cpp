@@ -20,6 +20,7 @@ int main(int argc, char* argv[]) {
     bool isColor = false;
     int blockSize = 32;
     int distance = 32;
+    int searchRange = -1 ; // <0 means full frame search, otherwise limited to range around block position
 
     string algorithm = "full_search";
     string implementation = "cpu_naive";
@@ -68,30 +69,37 @@ int main(int argc, char* argv[]) {
                 cerr << "Error: --height requires a numeric value" << endl;
                 return 1;
             }
-        } else if(arg == "--input-dir") {
+        } else if(arg == "--input_dir") {
             if(i + 1 < argc) {
                 input_dir = argv[++i];
             } else {
-                cerr << "Error: --input-dir requires a directory name" << endl;
+                cerr << "Error: --input_dir requires a directory name" << endl;
                 return 1;
             }
-        } else if(arg == "--range") {
+        } else if(arg == "--input_range") {
             if(i + 4 < argc) {
                 range_prefix = argv[++i];
                 range_suffix = argv[++i];
                 range_start = atoi(argv[++i]);
                 range_end = atoi(argv[++i]);
             } else {
-                cerr << "Error: --range requires 4 values (prefix suffix start end)" << endl;
+                cerr << "Error: --input_range requires 4 values (prefix suffix start end)" << endl;
                 return 1;
             }
-        } else if(arg == "--color") {
+        } else if(arg == "--range") {
+            if(i + 1 < argc) {
+                searchRange = atoi(argv[++i]);
+            } else {
+                cerr << "Error: --range requires a numeric value (search range in blocks)" << endl;
+                return 1;
+            }
+        }else if(arg == "--color") {
             isColor = true;
-        } else if(arg == "--block-size") {
+        } else if(arg == "--block_size") {
             if(i + 1 < argc) {
                 blockSize = atoi(argv[++i]);
             } else {
-                cerr << "Error: --block-size requires a numeric value" << endl;
+                cerr << "Error: --block_size requires a numeric value" << endl;
                 return 1;
             }
         } else if(arg == "--distance") {
@@ -108,7 +116,7 @@ int main(int argc, char* argv[]) {
 
     if(!range_prefix.empty()) {
         if(input_dir.empty()) {
-            cerr << "Error: --range requires --input-dir" << endl;
+            cerr << "Error: --input_range requires --input_dir" << endl;
             return 1;
         }
         for(int num = range_start; num <= range_end; ++num) {
@@ -122,9 +130,9 @@ int main(int argc, char* argv[]) {
     if(image_paths.size() < 2) {
         cerr << "Usage: " << argv[0]
              << " [--algorithm <algorithm>] [--implementation <impl>]"
-             << " [--input-dir <dir>] [--range <prefix> <suffix> <start> <end>]"
+             << " [--input_dir <dir>] [--input_range <prefix> <suffix> <start> <end>]"
              << " [--format pgm|ppm|raw] [--width W] [--height H] [--color]"
-             << " [--block-size <size>] [--distance <dist>]"
+             << " [--block_size <size>] [--distance <dist>] [--range <search_range>]"
              << " <image1> <image2> ..." << endl;
         cerr << "At least two images are required for motion estimation." << endl;
         cerr << "For RAW format, specify --width and --height. Use --color to specify RGB images (default is grayscale)." << endl;
@@ -132,6 +140,7 @@ int main(int argc, char* argv[]) {
         cerr << "Available implementations: cpu_naive, cuda_naive, cuda_optimized, cuda_uncoalesced_optimized" << endl;
         cerr << "Default block size: 32 (full frame search)" << endl;
         cerr << "Default search distance: 32 (used only for logarithmic_search)" << endl;
+        cerr << "Default search mode: full search" << endl;
         return 1;
     }
 
@@ -175,7 +184,11 @@ int main(int argc, char* argv[]) {
     if(algorithm == "logarithmic_search") {
         cout << "  Search distance: " << distance << endl;
     }
-    cout << "  Search mode: Full frame (naive)" << endl;
+    if(searchRange > 0) {
+        cout << "  Search mode: Range search (range=" << searchRange << " blocks)" << endl;
+    } else {
+        cout << "  Search mode: Full frame search" << endl;
+    }
     cout << "  Output directory: " << output_dir << endl << endl;
 
     unique_ptr<BlockMatcher> matcher;
@@ -187,6 +200,7 @@ int main(int argc, char* argv[]) {
     }
     
     matcher->setDistance(distance);
+    matcher->setSearchRange(searchRange);
 
     bool isRange = !range_prefix.empty();
 

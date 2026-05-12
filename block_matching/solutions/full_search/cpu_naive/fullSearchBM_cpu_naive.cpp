@@ -9,14 +9,17 @@ using namespace std;
 
 // Full Search Block Matching for grayscale images
 vector<vector<MotionVector>> fullSearchCPUNaiveGray(const ImageGray& curr, const ImageGray& ref,
-                                                     int blockSize) {
+                                                     int blockSize, int searchRange) {
     // Grid of blocks: blocksX = ⌊width / blockSize⌋, blocksY = ⌊height / blockSize⌋
     int blocksX = curr.width / blockSize;
     int blocksY = curr.height / blockSize;
     vector<vector<MotionVector>> mv(blocksY, vector<MotionVector>(blocksX));
 
     auto start_time = chrono::high_resolution_clock::now();
+    
+    string searchModeStr = (searchRange > 0) ? ("Range search (range=" + to_string(searchRange) + " blocks)") : "Full search";
     cout << "CPU Naive (Grayscale): Processing " << blocksX << "x" << blocksY << " = " << (blocksX * blocksY) << " blocks" << endl;
+    cout << "CPU Naive (Grayscale): Search mode: " << searchModeStr << " (searchRange=" << searchRange << ")" << endl;
 
     for(int by = 0; by < blocksY; by++) {
         for(int bx = 0; bx < blocksX; bx++) {
@@ -25,9 +28,18 @@ vector<vector<MotionVector>> fullSearchCPUNaiveGray(const ImageGray& curr, const
             int y = by * blockSize;
             int bestSAD = numeric_limits<int>::max();
             MotionVector bestMV{0, 0};
-            // try every possible block position in the reference frame (naive search)
-            for(int irefY = 0; irefY < blocksY; irefY++) {
-                for(int irefX = 0; irefX < blocksX; irefX++) {
+            /*Search bound for reference blocks on search_range (if searchRange > 0) or full frame (if searchRange <= 0)
+                If searchRange > 0, limit reference block positions to a square region around the current block:
+                    -irefX ∈ [max(0, bx - searchRange), min(blocksX - 1, bx + searchRange)]
+                    -irefY ∈ [max(0, by - searchRange), min(blocksY - 1, by + searchRange)]
+                    This creates a (2*searchRange + 1) x (2*searchRange + 1) block search area centered on the current block.
+                If searchRange <= 0, search all blocks in the reference frame:
+                    -irefX ∈ [0, blocksX - 1]
+                    -irefY ∈ [0, blocksY - 1]
+                    This creates a full frame search area.
+            */
+            for(int irefY = (searchRange > 0 ? max(0, by - searchRange) : 0); irefY < (searchRange > 0 ? min(blocksY - 1, by + searchRange) : blocksY - 1); irefY++) {
+                for(int irefX = (searchRange > 0 ? max(0, bx - searchRange) : 0); irefX < (searchRange > 0 ? min(blocksX - 1, bx + searchRange) : blocksX - 1); irefX++) {
                     int refX = irefX * blockSize;
                     int refY = irefY * blockSize;
                     // Compute displacement (dx, dy) from current block to candidate block
@@ -62,14 +74,17 @@ vector<vector<MotionVector>> fullSearchCPUNaiveGray(const ImageGray& curr, const
 
 // Full Search Block Matching for RGB color images
 vector<vector<MotionVector>> fullSearchCPUNaiveRGB(const ImageColor& curr, const ImageColor& ref,
-                                                    int blockSize) {
+                                                    int blockSize, int searchRange) {
     // Grid of blocks: blocksX = ⌊width / blockSize⌋, blocksY = ⌊height / blockSize⌋
     int blocksX = curr.width / blockSize;
     int blocksY = curr.height / blockSize;
     vector<vector<MotionVector>> mv(blocksY, vector<MotionVector>(blocksX));
 
     auto start_time = chrono::high_resolution_clock::now();
+    
+    string searchModeStr = (searchRange > 0) ? ("Range search (range=" + to_string(searchRange) + " blocks)") : "Full search";
     cout << "CPU Naive (RGB): Processing " << blocksX << "x" << blocksY << " = " << (blocksX * blocksY) << " blocks" << endl;
+    cout << "CPU Naive (RGB): Search mode: " << searchModeStr << endl;
 
     for(int by = 0; by < blocksY; by++) {
         for(int bx = 0; bx < blocksX; bx++) {
@@ -78,9 +93,18 @@ vector<vector<MotionVector>> fullSearchCPUNaiveRGB(const ImageColor& curr, const
             int y = by * blockSize;
             int bestSAD = numeric_limits<int>::max();
             MotionVector bestMV{0, 0};
-            // try every possible block position in the reference frame (naive search)
-            for(int irefY = 0; irefY < blocksY; irefY++) {
-                for(int irefX = 0; irefX < blocksX; irefX++) {
+            /*Search bound for reference blocks on search_range (if searchRange > 0) or full frame (if searchRange <= 0)
+                If searchRange > 0, limit reference block positions to a square region around the current block:
+                    -irefX ∈ [max(0, bx - searchRange), min(blocksX - 1, bx + searchRange)]
+                    -irefY ∈ [max(0, by - searchRange), min(blocksY - 1, by + searchRange)]
+                    This creates a (2*searchRange + 1) x (2*searchRange + 1) block search area centered on the current block.
+                If searchRange <= 0, search all blocks in the reference frame:
+                    -irefX ∈ [0, blocksX - 1]
+                    -irefY ∈ [0, blocksY - 1]
+                    This creates a full frame search area.
+            */
+            for(int irefY = (searchRange > 0 ? max(0, by - searchRange) : 0); irefY < (searchRange > 0 ? min(blocksY - 1, by + searchRange) : blocksY - 1); irefY++) {
+                for(int irefX = (searchRange > 0 ? max(0, bx - searchRange) : 0); irefX < (searchRange > 0 ? min(blocksX - 1, bx + searchRange) : blocksX - 1); irefX++) {
                     int refX = irefX * blockSize;
                     int refY = irefY * blockSize;
                     // Compute displacement (dx, dy) from current block to candidate block

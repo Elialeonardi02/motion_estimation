@@ -6,9 +6,9 @@
 
 // CPU implementations
 std::vector<std::vector<MotionVector>> fullSearchCPUNaiveGray(const ImageGray& curr, const ImageGray& ref,
-                                                               int blockSize);
+                                                               int blockSize, int searchRange);
 std::vector<std::vector<MotionVector>> fullSearchCPUNaiveRGB(const ImageColor& curr, const ImageColor& ref,
-                                                              int blockSize);
+                                                              int blockSize, int searchRange);
 
 // Logarithmic search CPU implementation
 std::vector<std::vector<MotionVector>> logarithmicSearchCPUNaiveGray(const ImageGray& curr, const ImageGray& ref,
@@ -32,20 +32,26 @@ extern std::vector<std::vector<MotionVector>> fullSearchCUDAUncoalescedOptimized
 #endif
 
 class FullSearchBlockMatcher : public BlockMatcher {
+private:
+    int searchRange = -1; // <0 means full frame search, otherwise limited to range around block position
 public:
     std::vector<std::vector<MotionVector>> matchGray(
         const ImageGray& curr, 
         const ImageGray& ref,
         int blockSize) override {
-        return fullSearchCPUNaiveGray(curr, ref, blockSize);
+        return fullSearchCPUNaiveGray(curr, ref, blockSize, searchRange);
     }
     
     std::vector<std::vector<MotionVector>> matchRGB(
         const ImageColor& curr, 
         const ImageColor& ref,
         int blockSize) override {
-        return fullSearchCPUNaiveRGB(curr, ref, blockSize);
+        return fullSearchCPUNaiveRGB(curr, ref, blockSize, searchRange);
     }
+    void setSearchRange(int range) override {
+        searchRange = range;
+    }
+
 };
 
 #ifndef NO_CUDA

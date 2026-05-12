@@ -22,8 +22,11 @@ public:
         const ImageColor& ref,
         int blockSize) = 0;
     
-    // Set algorithm-specific parameters (e.g., search distance for logarithmic search)
+    // set Distance parameter for logarithmic search
     virtual void setDistance(int) {}
+
+    // set Search Range parameter for range search mode
+    virtual void setSearchRange(int) {}
 };
 
 // Factory function to create block matcher instances
