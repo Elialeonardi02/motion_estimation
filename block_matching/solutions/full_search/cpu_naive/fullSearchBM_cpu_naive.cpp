@@ -38,8 +38,8 @@ vector<vector<MotionVector>> fullSearchCPUNaiveGray(const ImageGray& curr, const
                     -irefY ∈ [0, blocksY - 1]
                     This creates a full frame search area.
             */
-            for(int irefY = (searchRange > 0 ? max(0, by - searchRange) : 0); irefY < (searchRange > 0 ? min(blocksY - 1, by + searchRange) : blocksY - 1); irefY++) {
-                for(int irefX = (searchRange > 0 ? max(0, bx - searchRange) : 0); irefX < (searchRange > 0 ? min(blocksX - 1, bx + searchRange) : blocksX - 1); irefX++) {
+            for(int irefY = (searchRange > 0 ? max(0, by - searchRange) : 0); irefY < (searchRange > 0 ? min(blocksY, by + searchRange+1) : blocksY); irefY++) {
+                for(int irefX = (searchRange > 0 ? max(0, bx - searchRange) : 0); irefX < (searchRange > 0 ? min(blocksX, bx + searchRange+1) : blocksX); irefX++) {
                     int refX = irefX * blockSize;
                     int refY = irefY * blockSize;
                     // Compute displacement (dx, dy) from current block to candidate block
@@ -103,8 +103,8 @@ vector<vector<MotionVector>> fullSearchCPUNaiveRGB(const ImageColor& curr, const
                     -irefY ∈ [0, blocksY - 1]
                     This creates a full frame search area.
             */
-            for(int irefY = (searchRange > 0 ? max(0, by - searchRange) : 0); irefY < (searchRange > 0 ? min(blocksY - 1, by + searchRange) : blocksY - 1); irefY++) {
-                for(int irefX = (searchRange > 0 ? max(0, bx - searchRange) : 0); irefX < (searchRange > 0 ? min(blocksX - 1, bx + searchRange) : blocksX - 1); irefX++) {
+            for(int irefY = (searchRange > 0 ? max(0, by - searchRange) : 0); irefY < (searchRange > 0 ? min(blocksY, by + searchRange+1) : blocksY); irefY++) {
+                for(int irefX = (searchRange > 0 ? max(0, bx - searchRange) : 0); irefX < (searchRange > 0 ? min(blocksX, bx + searchRange+1) : blocksX); irefX++) {
                     int refX = irefX * blockSize;
                     int refY = irefY * blockSize;
                     // Compute displacement (dx, dy) from current block to candidate block
