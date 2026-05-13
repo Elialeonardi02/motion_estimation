@@ -32,11 +32,38 @@ __global__ void fullSearchKernel(const unsigned char* d_curr, const unsigned cha
     // Current block top-left corner
     int x = blockIdx.x * blockSize;
     int y = blockIdx.y * blockSize;
-    int total_positions; 
-    if (searchRange >0) {
-        total_positions = (min(searchRange * 2 + 1, gridDim.x) * min(searchRange * 2 + 1, gridDim.y)); // number of candidate blocks to search within the specified range
-    } else{
-        total_positions= gridDim.x * gridDim.y ;
+    
+    // Calculate search window in block coordinates
+    int search_bx_start = 0; // leftmost block index in reference frame 
+    int search_bx_end = 0;   // rightmost block index in reference frame
+    int search_by_start = 0; // topmost block index in reference frame
+    int search_by_end = 0;   // bottommost block index in reference frame 
+    int search_w = 0;        // width of search window in blocks
+    int search_h = 0;        // height of search window in blocks
+    int total_positions = 0; // total candidate positions in search window
+    /*                                  -
+       search_bx_start   search_bx_end  | 
+                                       search_h
+       search_by_start   search_by_end  |
+       |----------search_w-----------|  -                           
+    */
+    // limit search window based on search range, cut to frame boundaries if necessary
+    if (searchRange > 0) { 
+        search_bx_start = max(0, (int)blockIdx.x - searchRange);  
+        search_bx_end = min((int)gridDim.x - 1, (int)blockIdx.x + searchRange); 
+        search_by_start = max(0, (int)blockIdx.y - searchRange); 
+        search_by_end = min((int)gridDim.y - 1, (int)blockIdx.y + searchRange);
+        search_w = search_bx_end - search_bx_start + 1;
+        search_h = search_by_end - search_by_start + 1;
+        total_positions = search_w * search_h;
+    } else { // full search 
+        search_bx_start = 0;
+        search_bx_end = gridDim.x - 1;
+        search_by_start = 0;
+        search_by_end = gridDim.y - 1;
+        search_w = gridDim.x;
+        search_h = gridDim.y;
+        total_positions = gridDim.x * gridDim.y;
     }
 
     
@@ -49,31 +76,25 @@ __global__ void fullSearchKernel(const unsigned char* d_curr, const unsigned cha
     if (total_positions <= total_threads) { 
         // Few positions: parallelize SAD along threads
         if (tidx < total_positions) {
-            if (searchRange > 0) {
-                // Check if candidate block is within search range
-                ref_y = (blockIdx.y + threadIdx.y - searchRange) * blockSize;
-                ref_x = (blockIdx.x + threadIdx.x - searchRange) * blockSize;
-            }
-            else{
-                ref_y = (tidx / gridDim.x) * blockSize ; // y coordinate of reference block
-                ref_x = (tidx % gridDim.x) * blockSize; // x coordinate of reference block
-            }
+            // Convert position to 2D coordinates within search window
+            int ref_bx = search_bx_start + (tidx % search_w);
+            int ref_by = search_by_start + (tidx / search_w);
+            ref_x = ref_bx * blockSize;
+            ref_y = ref_by * blockSize;
+            
             best_sad = computeSAD_device(d_curr, d_ref, x, y, ref_x, ref_y, blockSize, width);
             best_dx = (ref_x - x) / blockSize; // local best dx
             best_dy = (ref_y - y) / blockSize; // local best dy
         }
     } else {
-        // Many positions: distribute work across threads
+        // Many positions: each thread processes multiple positions in search window and finds local best match among them
         for (int pos = tidx; pos < total_positions; pos += total_threads) {
-             if (searchRange > 0) {
-                // Check if candidate block is within search range
-                ref_y = (blockIdx.y + threadIdx.y - searchRange) * blockSize;
-                ref_x = (blockIdx.x + threadIdx.x - searchRange) * blockSize;
-            }
-            else{
-                ref_y = (tidx / gridDim.x) * blockSize ; // y coordinate of reference block
-                ref_x = (tidx % gridDim.x) * blockSize; // x coordinate of reference block
-            }
+            // Convert position to 2D coordinates within search window
+            int ref_bx = search_bx_start + (pos % search_w);
+            int ref_by = search_by_start + (pos / search_w);
+            ref_x = ref_bx * blockSize;
+            ref_y = ref_by * blockSize;
+            
             int sad = computeSAD_device(d_curr, d_ref, x, y, ref_x, ref_y, blockSize, width);
             int dist = (ref_x - x) * (ref_x - x) + (ref_y - y) * (ref_y - y);
             int best_dist = best_dx * best_dx + best_dy * best_dy; // local best distance for tie-breaking
@@ -97,15 +118,15 @@ __global__ void fullSearchKernel(const unsigned char* d_curr, const unsigned cha
     if (tidx == 0) {
         int global_best_sad = INT_MAX;
         int global_best_dx = 0, global_best_dy = 0;
-        
+        int global_best_dist = INT_MAX;
         for (int i = 0; i < total_threads; i++) {
             int idx = (blockIdx.x + blockIdx.y * gridDim.x) * threadsPerBlock + i;
-            int dist = d_thread_dx[idx] * d_thread_dx[idx] + d_thread_dy[idx] * d_thread_dy[idx]; // distance for tie-breaking
-            int best_dist = global_best_dx * global_best_dx + global_best_dy * global_best_dy;  // current global best distance for tie-breaking
-            if (d_thread_sad[idx] < global_best_sad || (d_thread_sad[idx] == global_best_sad && dist < best_dist)) { // update global best match
+            int dist = d_thread_dx[idx] * d_thread_dx[idx] + d_thread_dy[idx] * d_thread_dy[idx]; // distance for tie-breaking 
+            if (d_thread_sad[idx] < global_best_sad || (d_thread_sad[idx] == global_best_sad && dist < global_best_dist)) { // update global best match
                 global_best_sad = d_thread_sad[idx];
                 global_best_dx = d_thread_dx[idx];
                 global_best_dy = d_thread_dy[idx];
+                global_best_dist = dist; // current global best distance for tie-breaking
             }
         }
         
