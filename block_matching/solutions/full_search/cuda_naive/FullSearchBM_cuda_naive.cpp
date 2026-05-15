@@ -41,11 +41,12 @@ __global__ void fullSearchKernel(const unsigned char* d_curr, const unsigned cha
     int search_w = 0;        // width of search window in blocks
     int search_h = 0;        // height of search window in blocks
     int total_positions = 0; // total candidate positions in search window
-    /*                                  -
-       search_bx_start   search_bx_end  | 
-                                       search_h
-       search_by_start   search_by_end  |
-       |----------search_w-----------|  -                           
+    /*                                                              -
+       (search_bx_start, search_by_start)                           | 
+                                                                search_h
+                                (search_bx_end,search_by_end)       |
+                                                                    |
+        |---------------------------search_w-----------------|      -                           
     */
     // limit search window based on search range, cut to frame boundaries if necessary
     if (searchRange > 0) { 

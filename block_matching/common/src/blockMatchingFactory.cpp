@@ -28,7 +28,7 @@ extern std::vector<std::vector<MotionVector>> fullSearchCUDAOptimizedGray(
 extern std::vector<std::vector<MotionVector>> fullSearchCUDAUncoalescedOptimizedGray(
     const ImageGray& curr,
     const ImageGray& ref,
-    int blockSize);
+    int blockSize, int searchRange);
 #endif
 
 class FullSearchBlockMatcher : public BlockMatcher {
@@ -95,12 +95,17 @@ public:
 };
 
 class FullSearchBlockMatcherCUDAUncoalescedOptimized : public BlockMatcher {
+private:
+    int searchRange =-1; // <0 means full frame search
 public:
     std::vector<std::vector<MotionVector>> matchGray(
         const ImageGray& curr,
         const ImageGray& ref,
         int blockSize) override {
-        return fullSearchCUDAUncoalescedOptimizedGray(curr, ref, blockSize);
+        return fullSearchCUDAUncoalescedOptimizedGray(curr, ref, blockSize, searchRange);
+    }
+    void setSearchRange(int range) override {
+        searchRange = range;
     }
 
     std::vector<std::vector<MotionVector>> matchRGB(
