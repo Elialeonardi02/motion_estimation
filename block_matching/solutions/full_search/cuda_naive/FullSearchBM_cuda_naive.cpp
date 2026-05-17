@@ -148,7 +148,9 @@ vector<vector<MotionVector>> fullSearchCUDANaiveGray(const ImageGray& curr, cons
     
     size_t bytesPerFrame = frameSize * sizeof(unsigned char); // Grayscale: 1 byte per pixel 256 levels of gray
     
-    std::cout << "CUDA: Processing " << curr.width << "x" << curr.height << " frame with block size " << blockSize << std::endl;
+    string searchModeStr = (searchRange > 0) ? ("Range search (range=" + to_string(searchRange) + " blocks)") : "Full search";
+    std::cout << "CUDA Naive (Grayscale): Processing frame " << curr.width << "x" << curr.height
+              << " with block size " << blockSize << std::endl;
     
     // Allocate GPU memory for frames
     unsigned char* d_curr = nullptr;    // GPU pointer matrix for current frame
@@ -157,7 +159,7 @@ vector<vector<MotionVector>> fullSearchCUDANaiveGray(const ImageGray& curr, cons
     gpuErrorCheck(cudaMalloc((void**)&d_ref, bytesPerFrame));
     
     // Copy frames to GPU
-    std::cout << "CUDA: Copying frames to GPU..." << std::endl;
+    std::cout << "CUDA Naive (Grayscale): Copying frames to GPU..." << std::endl;
     gpuErrorCheck(cudaMemcpy(d_curr, curr.data.data(), bytesPerFrame, cudaMemcpyHostToDevice));
     gpuErrorCheck(cudaMemcpy(d_ref, ref.data.data(), bytesPerFrame, cudaMemcpyHostToDevice));
     
@@ -165,7 +167,10 @@ vector<vector<MotionVector>> fullSearchCUDANaiveGray(const ImageGray& curr, cons
     int blocksX = curr.width / blockSize;   // Number of orizontal pixel divided by block size
     int blocksY = curr.height / blockSize;  // Number of vertical pixel divided by block size
     
-    std::cout << "CUDA: Grid size: " << blocksX << "x" << blocksY << " = " << (blocksX*blocksY) << " blocks" << std::endl;
+    std::cout << "CUDA Naive (Grayscale): Grid size: " << blocksX << "x" << blocksY
+              << " = " << (blocksX*blocksY) << " blocks" << std::endl;
+    std::cout << "CUDA Naive (Grayscale): Search mode: " << searchModeStr
+              << " (searchRange=" << searchRange << ")" << std::endl;
 
     // Allocate GPU memory for motion vectors
     size_t mvSize = blocksX * blocksY * sizeof(MotionVector);
@@ -203,7 +208,7 @@ vector<vector<MotionVector>> fullSearchCUDANaiveGray(const ImageGray& curr, cons
     dim3 gridDim(blocksX, blocksY); // One block for each search block in current frame
     dim3 blockDim(threadsPerBlockX, threadsPerBlockY);  // Each block has threadsPerBlockX × threadsPerBlockY threads 
     
-    std::cout << "CUDA: Launching kernel with " << blockDim.x << "x" << blockDim.y 
+    std::cout << "CUDA Naive (Grayscale): Launching kernel with " << blockDim.x << "x" << blockDim.y 
               << " threads per block (" << (blockDim.x * blockDim.y) << " total threads)..." << std::endl;
     
     // Create CUDA events for timing
@@ -217,12 +222,13 @@ vector<vector<MotionVector>> fullSearchCUDANaiveGray(const ImageGray& curr, cons
                                             d_thread_dx, d_thread_dy, threadsPerBlock, searchRange);
     gpuErrorCheck(cudaGetLastError());
     
-    std::cout << "CUDA: Kernel launched, synchronizing..." << std::endl;
+    std::cout << "CUDA Naive (Grayscale): Kernel launched, synchronizing..." << std::endl;
     gpuErrorCheck(cudaDeviceSynchronize());
     
     recordCudaEvent(stop);
     float milliseconds = elapsedCudaTime(start, stop);
-    std::cout << "CUDA: Kernel execution time: " << milliseconds << " ms" << std::endl;
+    std::cout << "CUDA Naive (Grayscale): Timing:" << std::endl;
+    std::cout << "  Kernel execution time: " << milliseconds << " ms" << std::endl;
     destroyCudaEvent(start);
     destroyCudaEvent(stop);
     
@@ -239,7 +245,7 @@ vector<vector<MotionVector>> fullSearchCUDANaiveGray(const ImageGray& curr, cons
     }
     
     // Cleanup
-    std::cout << "CUDA: Cleaning up GPU memory..." << std::endl;
+    std::cout << "CUDA Naive (Grayscale): Cleaning up GPU memory..." << std::endl;
     delete[] h_mv;
     cudaFree(d_curr);
     cudaFree(d_ref);
@@ -248,7 +254,7 @@ vector<vector<MotionVector>> fullSearchCUDANaiveGray(const ImageGray& curr, cons
     cudaFree(d_thread_dx);
     cudaFree(d_thread_dy);
     
-    std::cout << "CUDA: Complete!" << std::endl;
+    std::cout << "CUDA Naive (Grayscale): Complete!" << std::endl;
     return result;
 }
 

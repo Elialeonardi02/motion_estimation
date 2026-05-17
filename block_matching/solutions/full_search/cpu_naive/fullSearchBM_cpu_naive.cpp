@@ -17,9 +17,13 @@ vector<vector<MotionVector>> fullSearchCPUNaiveGray(const ImageGray& curr, const
 
     auto start_time = chrono::high_resolution_clock::now();
     
-    string searchModeStr = (searchRange > 0) ? ("Range search (range=" + to_string(searchRange) + " blocks)") : "Full search";
-    cout << "CPU Naive (Grayscale): Processing " << blocksX << "x" << blocksY << " = " << (blocksX * blocksY) << " blocks" << endl;
-    cout << "CPU Naive (Grayscale): Search mode: " << searchModeStr << " (searchRange=" << searchRange << ")" << endl;
+        string searchModeStr = (searchRange > 0) ? ("Range search (range=" + to_string(searchRange) + " blocks)") : "Full search";
+        cout << "CPU Naive (Grayscale): Processing frame " << curr.width << "x" << curr.height
+            << " with block size " << blockSize << endl;
+        cout << "CPU Naive (Grayscale): Grid size: " << blocksX << "x" << blocksY
+            << " = " << (blocksX * blocksY) << " blocks" << endl;
+        cout << "CPU Naive (Grayscale): Search mode: " << searchModeStr
+            << " (searchRange=" << searchRange << ")" << endl;
 
     for(int by = 0; by < blocksY; by++) {
         for(int bx = 0; bx < blocksX; bx++) {
@@ -68,7 +72,8 @@ vector<vector<MotionVector>> fullSearchCPUNaiveGray(const ImageGray& curr, const
     }
     auto end_time = chrono::high_resolution_clock::now();
     chrono::duration<double> total_time = end_time - start_time;
-    cout << "CPU Naive (Grayscale): Total processing time: " << total_time.count() << " s" << endl;
+    cout << "CPU Naive (Grayscale): Timing:" << endl;
+    cout << "  Total processing time: " << total_time.count() << " s" << endl;
     return mv;
 }
 
@@ -82,9 +87,13 @@ vector<vector<MotionVector>> fullSearchCPUNaiveRGB(const ImageColor& curr, const
 
     auto start_time = chrono::high_resolution_clock::now();
     
-    string searchModeStr = (searchRange > 0) ? ("Range search (range=" + to_string(searchRange) + " blocks)") : "Full search";
-    cout << "CPU Naive (RGB): Processing " << blocksX << "x" << blocksY << " = " << (blocksX * blocksY) << " blocks" << endl;
-    cout << "CPU Naive (RGB): Search mode: " << searchModeStr << endl;
+        string searchModeStr = (searchRange > 0) ? ("Range search (range=" + to_string(searchRange) + " blocks)") : "Full search";
+        cout << "CPU Naive (RGB): Processing frame " << curr.width << "x" << curr.height
+            << " with block size " << blockSize << endl;
+        cout << "CPU Naive (RGB): Grid size: " << blocksX << "x" << blocksY
+            << " = " << (blocksX * blocksY) << " blocks" << endl;
+        cout << "CPU Naive (RGB): Search mode: " << searchModeStr
+            << " (searchRange=" << searchRange << ")" << endl;
 
     for(int by = 0; by < blocksY; by++) {
         for(int bx = 0; bx < blocksX; bx++) {
@@ -134,6 +143,7 @@ vector<vector<MotionVector>> fullSearchCPUNaiveRGB(const ImageColor& curr, const
     }
     auto end_time = chrono::high_resolution_clock::now();
     chrono::duration<double> total_time = end_time - start_time;
-    cout << "CPU Naive (RGB): Total processing time: " << total_time.count() << " s" << endl;
+    cout << "CPU Naive (RGB): Timing:" << endl;
+    cout << "  Total processing time: " << total_time.count() << " s" << endl;
     return mv;
 }

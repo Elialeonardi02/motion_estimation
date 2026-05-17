@@ -63,11 +63,13 @@ __global__ void computeSADKernel(const unsigned char*  d_curr,const unsigned cha
     int* s_partial_sad = (int*)(s_ref + pixelsPerBlock);
     
     
-    for (int i = threadIdx.x; i < pixelsPerBlock; i += blockDim.x)
-        s_curr[i] = d_curr[(y + i / blockSize) * width + (x + i % blockSize)];
-
-    for (int i = threadIdx.x; i < pixelsPerBlock; i += blockDim.x)
-        s_ref[i] = d_ref[(ref_y + i / blockSize) * width + (ref_x + i % blockSize)];
+    // process in row-major order, better coalescing
+    for (int i = threadIdx.x; i < pixelsPerBlock; i += blockDim.x) {
+        int px = i % blockSize;
+        int py = i / blockSize;
+        s_curr[i] = d_curr[(y + py) * width + (x + px)];
+        s_ref[i] = __ldg(&d_ref[(ref_y + py) * width + (ref_x + px)]);
+    }
 
     __syncthreads();
 
@@ -79,10 +81,10 @@ __global__ void computeSADKernel(const unsigned char*  d_curr,const unsigned cha
         partial_sad += abs((int)s_curr[i] - (int)s_ref[i]);                                
     }
     s_partial_sad[threadIdx.x] = partial_sad;
-    __syncthreads();
+    __syncthreads(); // FIXME is always needed to synchronize?
 
     // reduction in shared memory to get total SAD for this position
-    for (int stride = blockDim.x >>1; stride > 0; stride >>= 1) {
+    for (int stride = blockDim.x >> 1; stride > 0; stride >>= 1) {
         if (threadIdx.x < stride) {
             s_partial_sad[threadIdx.x] += s_partial_sad[threadIdx.x + stride];
         }
@@ -93,7 +95,7 @@ __global__ void computeSADKernel(const unsigned char*  d_curr,const unsigned cha
     }
 }
 
-__global__ void findBestMVKernel(const int* d_sad, MotionVector* d_mv, int totalBlocks, int searchRange){
+__global__ void findBestMVKernel(const int* d_sad, MotionVector* d_mv, int searchRange){
     int search_bx_start = 0;
     int search_bx_end = 0;
     int search_by_start = 0;
@@ -120,7 +122,7 @@ __global__ void findBestMVKernel(const int* d_sad, MotionVector* d_mv, int total
         total_positions = gridDim.x * gridDim.y;
     }
 
-    const int base= (blockIdx.y* gridDim.x + blockIdx.x)* totalBlocks;
+    const int base = (blockIdx.y * gridDim.x + blockIdx.x) * total_positions;
 
     // local best for each thread
     int local_best_sad = INT_MAX;
@@ -163,7 +165,7 @@ __global__ void findBestMVKernel(const int* d_sad, MotionVector* d_mv, int total
                 s_dist[threadIdx.x] = s_dist[threadIdx.x + stride];
             }
         }
-        __syncthreads();
+        __syncthreads(); // FIXME is always needed to synchronize?
     }
     if (threadIdx.x == 0) {
         d_mv[blockIdx.y * gridDim.x + blockIdx.x] = {s_dx[0], s_dy[0]};
@@ -189,9 +191,11 @@ vector<vector<MotionVector>> fullSearchCUDAOptimizedGray(const ImageGray& curr, 
         const int searchWindowBlocksX = (searchRange > 0) ? min(blocksX, searchRange * 2 + 1) : blocksX;
         const int searchWindowBlocksY = (searchRange > 0) ? min(blocksY, searchRange * 2 + 1) : blocksY;
         const int maxCandidates = searchWindowBlocksX * searchWindowBlocksY;
-    cout << "CUDA: Grid size: " << blocksX << "x" << blocksY
-         << " = " << TotalBlocks << " blocks" << std::endl;
-        cout << "CUDA: Search mode: "
+        cout << "CUDA Optimized (Grayscale): Processing frame " << curr.width << "x" << curr.height
+            << " with block size " << blockSize << endl;
+        cout << "CUDA Optimized (Grayscale): Grid size: " << blocksX << "x" << blocksY
+            << " = " << TotalBlocks << " blocks" << std::endl;
+        cout << "CUDA Optimized (Grayscale): Search mode: "
             << ((searchRange > 0) ? ("Range search (range=" + to_string(searchRange) + " blocks)") : "Full search")
             << " (searchRange=" << searchRange << ")" << std::endl;
 
@@ -208,7 +212,7 @@ vector<vector<MotionVector>> fullSearchCUDAOptimizedGray(const ImageGray& curr, 
 
     
     
-    cout << "GPU: " << deviceProp.name << "\n"
+    cout << "CUDA Optimized (Grayscale): GPU: " << deviceProp.name << "\n"
          << "  maxThreadsPerBlock: " << deviceProp.maxThreadsPerBlock << "\n"
          << "  sharedMemPerBlock: " << deviceProp.sharedMemPerBlock << " bytes\n";
     /* shared memory calculation:
@@ -274,11 +278,11 @@ vector<vector<MotionVector>> fullSearchCUDAOptimizedGray(const ImageGray& curr, 
     gpuErrorCheck(cudaMalloc(&d_sad,  sadBytes));
     gpuErrorCheck(cudaMalloc(&d_mv,   blocksX * blocksY * sizeof(MotionVector)));
 
-     cout << "Selected threads per block: " << threadsPerBlock
+    cout << "CUDA Optimized (Grayscale): Selected threads per block: " << threadsPerBlock
          << " (K1=" << smKSad/1024.0 << "KB, K2=" << smKBestMV/1024.0 << "KB)\n\n";
 
-    cout << "CUDA: d_sad = " << sadBytes / (1024.0 * 1024.0) << " MB\n";
-    cout << "CUDA: Copying frames to GPU..." << std::endl;
+    cout << "CUDA Optimized (Grayscale): d_sad = " << sadBytes / (1024.0 * 1024.0) << " MB\n";
+    cout << "CUDA Optimized (Grayscale): Copying frames to GPU..." << std::endl;
     gpuErrorCheck(cudaMemcpy(d_curr, curr.data.data(), bytesPerFrame, cudaMemcpyHostToDevice));
     gpuErrorCheck(cudaMemcpy(d_ref,  ref.data.data(),  bytesPerFrame, cudaMemcpyHostToDevice));
 
@@ -300,7 +304,7 @@ vector<vector<MotionVector>> fullSearchCUDAOptimizedGray(const ImageGray& curr, 
     recordCudaEvent(evTotalStart);
     recordCudaEvent(evKSadStart);
 
-    cout << "CUDA: Launching computeSADKernel with "
+    cout << "CUDA Optimized (Grayscale): Launching computeSADKernel with "
          << blockDim.x << "x" << blockDim.y << "x" << blockDim.z
          << " threads per block (" << threadsPerBlock << " total threads)..." << std::endl;
 
@@ -313,16 +317,16 @@ vector<vector<MotionVector>> fullSearchCUDAOptimizedGray(const ImageGray& curr, 
 
     recordCudaEvent(evKBestMVStart);
 
-    cout << "CUDA: Launching findBestMVKernel with "
+    cout << "CUDA Optimized (Grayscale): Launching findBestMVKernel with "
          << blockDim.x << "x" << blockDim.y << "x" << blockDim.z
          << " threads per block (" << threadsPerBlock << " total threads)..." << std::endl;
 
-    findBestMVKernel<<<gridKBestMV, blockDim, smKBestMV>>>(d_sad, d_mv, maxCandidates, searchRange);
+    findBestMVKernel<<<gridKBestMV, blockDim, smKBestMV>>>(d_sad, d_mv, searchRange);
     gpuErrorCheck(cudaGetLastError());
     recordCudaEvent(evKBestMVStop);
     recordCudaEvent(evTotalStop);
 
-    cout << "CUDA: Kernel launched, synchronizing..." << std::endl;
+    cout << "CUDA Optimized (Grayscale): Kernel launched, synchronizing..." << std::endl;
     gpuErrorCheck(cudaDeviceSynchronize());
 
     // Timing report
@@ -330,11 +334,10 @@ vector<vector<MotionVector>> fullSearchCUDAOptimizedGray(const ImageGray& curr, 
     const float msKBestMV    = elapsedCudaTime(evKBestMVStart,    evKBestMVStop);
     const float msTotal = elapsedCudaTime(evTotalStart, evTotalStop);
 
-    cout << "CUDA timing:\n"
-         << "  computeSADKernel : " << msKSad    << " ms" << std::endl
-         << "  findBestMVKernel : " << msKBestMV    << " ms" << std::endl
-         << "  ─────────────────────────────\n"
-         << "  totale           : " << msTotal << " ms" << std::endl;
+    cout << "CUDA Optimized (Grayscale): Timing:" << endl;
+    cout << "  computeSADKernel : " << msKSad << " ms" << std::endl;
+    cout << "  findBestMVKernel : " << msKBestMV << " ms" << std::endl;
+    cout << "  Total            : " << msTotal << " ms" << std::endl;
 
     destroyCudaEvent(evTotalStart); destroyCudaEvent(evTotalStop);
     destroyCudaEvent(evKSadStart);    destroyCudaEvent(evKSadStop);
@@ -352,13 +355,13 @@ vector<vector<MotionVector>> fullSearchCUDAOptimizedGray(const ImageGray& curr, 
             result[by][bx] = h_mv_flat[by * blocksX + bx];
 
     // Cleanup GPU
-    cout << "CUDA: Cleaning up GPU memory..." << std::endl;
+    cout << "CUDA Optimized (Grayscale): Cleaning up GPU memory..." << std::endl;
     cudaFree(d_curr);
     cudaFree(d_ref);
     cudaFree(d_sad);
     cudaFree(d_mv);
 
-    cout << "CUDA: Complete!" << std::endl;
+    cout << "CUDA Optimized (Grayscale): Complete!" << std::endl;
     return result;
     
 }

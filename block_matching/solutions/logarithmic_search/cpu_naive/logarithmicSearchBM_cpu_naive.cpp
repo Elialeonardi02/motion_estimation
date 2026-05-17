@@ -16,7 +16,12 @@ vector<vector<MotionVector>> logarithmicSearchCPUNaiveGray(const ImageGray& curr
     vector<vector<MotionVector>> mv(blocksY, vector<MotionVector>(blocksX));
 
     auto start_time = chrono::high_resolution_clock::now();
-    cout << "CPU Naive (Grayscale): Processing " << blocksX << "x" << blocksY << " = " << (blocksX * blocksY) << " blocks" << endl;
+    cout << "CPU Naive (Grayscale): Processing frame " << curr.width << "x" << curr.height
+        << " with block size " << blockSize << endl;
+    cout << "CPU Naive (Grayscale): Grid size: " << blocksX << "x" << blocksY
+        << " = " << (blocksX * blocksY) << " blocks" << endl;
+    cout << "CPU Naive (Grayscale): Search strategy: Logarithmic search (distance="
+            << distance << " blocks)" << endl;
 
     for(int by = 0; by < blocksY; by++) {
         for(int bx = 0; bx < blocksX; bx++) {
@@ -99,7 +104,8 @@ vector<vector<MotionVector>> logarithmicSearchCPUNaiveGray(const ImageGray& curr
     }
     auto end_time = chrono::high_resolution_clock::now();
     chrono::duration<double> total_time = end_time - start_time;
-    cout << "CPU Naive (Grayscale): Total processing time: " << total_time.count() << " s" << endl;
+    cout << "CPU Naive (Grayscale): Timing:" << endl;
+    cout << "  Total processing time: " << total_time.count() << " s" << endl;
     return mv; 
 }
 

@@ -240,7 +240,9 @@ __global__ void fullSearchKernel(const unsigned char* d_curr, const unsigned cha
     
     size_t bytesPerFrame = frameSize * sizeof(unsigned char); // Grayscale: 1 byte per pixel 256 levels of gray
     
-    std::cout << "CUDA: Processing " << curr.width << "x" << curr.height << " frame with block size " << blockSize << std::endl;
+    string searchModeStr = (searchRange > 0) ? ("Range search (range=" + to_string(searchRange) + " blocks)") : "Full search";
+    std::cout << "CUDA Uncoalesced Optimized (Grayscale): Processing frame " << curr.width << "x" << curr.height
+              << " with block size " << blockSize << std::endl;
     
     // Allocate and copy frames to GPU
     unsigned char* d_curr = nullptr;
@@ -249,7 +251,7 @@ __global__ void fullSearchKernel(const unsigned char* d_curr, const unsigned cha
     gpuErrorCheck(cudaMalloc((void**)&d_ref, bytesPerFrame));
     
     // Copy frames to GPU
-    std::cout << "CUDA: Copying frames to GPU..." << std::endl;
+    std::cout << "CUDA Uncoalesced Optimized (Grayscale): Copying frames to GPU..." << std::endl;
     gpuErrorCheck(cudaMemcpy(d_curr, curr.data.data(), bytesPerFrame, cudaMemcpyHostToDevice));
     gpuErrorCheck(cudaMemcpy(d_ref, ref.data.data(), bytesPerFrame, cudaMemcpyHostToDevice));
     
@@ -257,7 +259,10 @@ __global__ void fullSearchKernel(const unsigned char* d_curr, const unsigned cha
     int blocksX = curr.width / blockSize;
     int blocksY = curr.height / blockSize;
     
-    std::cout << "CUDA: Grid size: " << blocksX << "x" << blocksY << " = " << (blocksX*blocksY) << " blocks" << std::endl;
+    std::cout << "CUDA Uncoalesced Optimized (Grayscale): Grid size: " << blocksX << "x" << blocksY
+              << " = " << (blocksX*blocksY) << " blocks" << std::endl;
+    std::cout << "CUDA Uncoalesced Optimized (Grayscale): Search mode: " << searchModeStr
+              << " (searchRange=" << searchRange << ")" << std::endl;
 
     // Allocate GPU memory for motion vectors
     size_t mvSize = blocksX * blocksY * sizeof(MotionVector);
@@ -289,7 +294,7 @@ __global__ void fullSearchKernel(const unsigned char* d_curr, const unsigned cha
     dim3 gridDim(blocksX, blocksY);
     dim3 blockDim(threadsPerBlockX, threadsPerBlockY, threadsPerBlockZ);
     
-    std::cout << "CUDA: Launching kernel with " << blockDim.x << "x" << blockDim.y << "x" << blockDim.z
+    std::cout << "CUDA Uncoalesced Optimized (Grayscale): Launching kernel with " << blockDim.x << "x" << blockDim.y << "x" << blockDim.z
               << " threads per block (" << threadsPerBlock << " total threads)..." << std::endl;
     
     // Create CUDA events for timing
@@ -309,12 +314,13 @@ __global__ void fullSearchKernel(const unsigned char* d_curr, const unsigned cha
                                             curr.width, threadsPerBlock, searchRange);
     gpuErrorCheck(cudaGetLastError());
     
-    std::cout << "CUDA: Kernel launched, synchronizing..." << std::endl;
+    std::cout << "CUDA Uncoalesced Optimized (Grayscale): Kernel launched, synchronizing..." << std::endl;
     gpuErrorCheck(cudaDeviceSynchronize());
     
     recordCudaEvent(stop);
     float milliseconds = elapsedCudaTime(start, stop);
-    std::cout << "CUDA: Kernel execution time: " << milliseconds << " ms" << std::endl;
+    std::cout << "CUDA Uncoalesced Optimized (Grayscale): Timing:" << std::endl;
+    std::cout << "  Kernel execution time: " << milliseconds << " ms" << std::endl;
     destroyCudaEvent(start);
     destroyCudaEvent(stop);
     
@@ -329,13 +335,13 @@ __global__ void fullSearchKernel(const unsigned char* d_curr, const unsigned cha
             result[by][bx] = h_mv[by * blocksX + bx];
     
     // Cleanup
-    std::cout << "CUDA: Cleaning up GPU memory..." << std::endl;
+    std::cout << "CUDA Uncoalesced Optimized (Grayscale): Cleaning up GPU memory..." << std::endl;
     delete[] h_mv;
     cudaFree(d_curr);
     cudaFree(d_ref);
     cudaFree(d_mv);
 
-    std::cout << "CUDA: Complete!" << std::endl;
+    std::cout << "CUDA Uncoalesced Optimized (Grayscale): Complete!" << std::endl;
     return result;
 }
 
