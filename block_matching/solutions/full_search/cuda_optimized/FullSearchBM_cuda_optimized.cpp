@@ -14,84 +14,83 @@ using namespace std;
 __global__ void computeSADKernel(const unsigned char*  d_curr,const unsigned char*  d_ref,
                                  int* d_sad,int blockSize, int width, int searchRange){
 
-    
-    // index
-    const int x = blockIdx.x * blockSize;
+    // top-left corner of the current block in the current frame
+    const int x = blockIdx.x * blockSize; 
     const int y = blockIdx.y * blockSize;
-    const int pixelsPerBlock = blockSize * blockSize;
-    const int pixelsPerThread = (pixelsPerBlock + blockDim.x - 1) / blockDim.x;
 
-    int search_bx_start = 0;
+    const int pixelsPerBlock = blockSize * blockSize; // number of pixels in one block
+    const int pixelsPerThread = (pixelsPerBlock + blockDim.x - 1) / blockDim.x; // divide pixels among threads, rounding up
+
+    // search pixel coordinates start and end (in blocks)
+    int search_bx_start = 0; 
     int search_bx_end = 0;
     int search_by_start = 0;
     int search_by_end = 0;
+    // search window dimensions in blocks
     int search_w = 0;
     int search_h = 0;
-    int total_positions = 0;
+    int total_positions = 0; // total candidate positions in the search window for this block
 
-    if (searchRange > 0) {
-        search_bx_start = max(0, (int)blockIdx.x - searchRange);
-        search_bx_end = min((int)gridDim.x - 1, (int)blockIdx.x + searchRange);
-        search_by_start = max(0, (int)blockIdx.y - searchRange);
-        search_by_end = min((int)gridDim.y - 1, (int)blockIdx.y + searchRange);
-        search_w = search_bx_end - search_bx_start + 1;
-        search_h = search_by_end - search_by_start + 1;
-        total_positions = search_w * search_h;
-    } else {
-        search_bx_start = 0;
-        search_bx_end = gridDim.x - 1;
-        search_by_start = 0;
-        search_by_end = gridDim.y - 1;
-        search_w = gridDim.x;
-        search_h = gridDim.y;
-        total_positions = gridDim.x * gridDim.y;
+    if (searchRange > 0) { // range search mode: limit search to a window around the current block
+        search_bx_start = max(0, (int)blockIdx.x - searchRange);                // not go over the left border
+        search_bx_end = min((int)gridDim.x - 1, (int)blockIdx.x + searchRange); // not go over the right border
+        search_by_start = max(0, (int)blockIdx.y - searchRange);                // not go over the top border
+        search_by_end = min((int)gridDim.y - 1, (int)blockIdx.y + searchRange); // not go over the bottom border
+        search_w = search_bx_end - search_bx_start + 1;                         // +1 to include start position
+        search_h = search_by_end - search_by_start + 1;                        
+        total_positions = search_w * search_h;                                  // total candidate positions in the search window for this block
+    } else {// full search mode: search the entire frame
+        search_bx_end = gridDim.x - 1;                                          // not go over the right border                                          
+        search_by_end = gridDim.y - 1;                                          // not go over the bottom border        
+        search_w = gridDim.x;                                                   // search the entire width of the frame in blocks
+        search_h = gridDim.y;                                                   // search the entire height of the frame in blocks     
+        total_positions = gridDim.x * gridDim.y;                                // total candidate positions in the entire frame for this block
     }
 
-    if (blockIdx.z >= total_positions) {
+    if (blockIdx.z >= total_positions) { // out of bounds for the number of candidate positions in the search window
         return;
     }
 
-    const int ref_bx = search_bx_start + (blockIdx.z % search_w);
-    const int ref_by = search_by_start + (blockIdx.z / search_w);
-    const int ref_x = ref_bx * blockSize;
-    const int ref_y = ref_by * blockSize;
+    const int ref_x = (search_bx_start + (blockIdx.z % search_w)) * blockSize;  // candidate block's top-left corner in the reference frame in pixels   
+    const int ref_y = (search_by_start + (blockIdx.z / search_w)) * blockSize;  // candidate block's top-left corner in the reference frame in pixels
     
     // shared memory 
-    extern  __shared__ unsigned char smem[];
-    unsigned char* s_curr = smem;
-    unsigned char* s_ref = s_curr + pixelsPerBlock;
-    int* s_partial_sad = (int*)(s_ref + pixelsPerBlock);
+    extern  __shared__ unsigned char smem[];             
+    unsigned char* s_curr = smem;                           // shared memory for current block pixels
+    unsigned char* s_ref = s_curr + pixelsPerBlock;         // shared memory for reference block pixels
+    int* s_partial_sad = (int*)(s_ref + pixelsPerBlock);    // shared memory for partial SAD results (one per thread)
     
-    
-    // process in row-major order, better coalescing
+    // load blocks in shared memory with coalesced access
+    // Pixel load per thread: i = threadIdx.x, threadIdx.x + blockDim.x, ...
+    // Pixel count ~= pixelsPerBlock / blockDim.x last thread may load fewer pixels
     for (int i = threadIdx.x; i < pixelsPerBlock; i += blockDim.x) {
-        int px = i % blockSize;
-        int py = i / blockSize;
-        s_curr[i] = d_curr[(y + py) * width + (x + px)];
-        s_ref[i] = __ldg(&d_ref[(ref_y + py) * width + (ref_x + px)]);
+        int px = i % blockSize;                                         // pixel x coordinate within the block
+        int py = i / blockSize;                                         // pixel y coordinate within the block
+        s_curr[i] = d_curr[(y + py) * width + (x + px)];                // load current block pixel
+        s_ref[i] = __ldg(&d_ref[(ref_y + py) * width + (ref_x + px)]);  // load reference block pixel (_ldg read-only cache optimization)
     }
 
     __syncthreads();
 
     // partial sad computation for each thread
     int partial_sad = 0;
-    const int startPixel = threadIdx.x * pixelsPerThread;
-    const int endPixel = min(startPixel + pixelsPerThread, pixelsPerBlock);
-    for (int i = startPixel; i < endPixel; ++i) {
-        partial_sad += abs((int)s_curr[i] - (int)s_ref[i]);                                
+    const int startPixel = threadIdx.x * pixelsPerThread;                   // starting pixel index for this thread
+    const int endPixel = min(startPixel + pixelsPerThread, pixelsPerBlock); // ending pixel index for this thread
+    for (int i = startPixel; i < endPixel; ++i) {                           
+        partial_sad += abs((int)s_curr[i] - (int)s_ref[i]);                 // accumulate SAD for assigned pixels               
     }
-    s_partial_sad[threadIdx.x] = partial_sad;
+    s_partial_sad[threadIdx.x] = partial_sad;                   // store partial SAD in shared memory 
     __syncthreads(); // FIXME is always needed to synchronize?
 
     // reduction in shared memory to get total SAD for this position
-    for (int stride = blockDim.x >> 1; stride > 0; stride >>= 1) {
-        if (threadIdx.x < stride) {
-            s_partial_sad[threadIdx.x] += s_partial_sad[threadIdx.x + stride];
+    for (int stride = blockDim.x >> 1; stride > 0; stride >>= 1) {  // threads reduce by powers of 2
+        if (threadIdx.x < stride) { // only first half of threads are active in each reduction step
+            s_partial_sad[threadIdx.x] += s_partial_sad[threadIdx.x + stride]; // accumulate SAD values from the second half of threads into the first half
         }
         __syncthreads();
     }
-    if (threadIdx.x == 0) {
-        d_sad[(blockIdx.y* gridDim.x + blockIdx.x)* gridDim.z + blockIdx.z] = s_partial_sad[0];
+    if (threadIdx.x == 0) { // thread 0 writes the final SAD for this candidate position to global memory
+        d_sad[(blockIdx.y* gridDim.x + blockIdx.x)* gridDim.z + blockIdx.z] = s_partial_sad[0]; 
     }
 }
 
@@ -164,7 +163,7 @@ __global__ void findBestMVKernel(const int* d_sad, MotionVector* d_mv, int searc
                 s_dy[threadIdx.x] = s_dy[threadIdx.x + stride];
                 s_dist[threadIdx.x] = s_dist[threadIdx.x + stride];
             }
-        }
+        }// each thread load 1 or a number of pixels that is a multiple of 32 to ensure coalescing, rounding up if needed
         __syncthreads(); // FIXME is always needed to synchronize?
     }
     if (threadIdx.x == 0) {
