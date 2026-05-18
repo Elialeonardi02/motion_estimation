@@ -5,6 +5,7 @@
 #include <limits>
 #include <cuda_runtime.h>
 #include "FullSearchBM_cuda_naive.h"
+#include "utils.h"
 #include "cuda_utils.h"
 #include "sad_utils.h"
 
@@ -33,40 +34,8 @@ __global__ void fullSearchKernel(const unsigned char* d_curr, const unsigned cha
     int x = blockIdx.x * blockSize;
     int y = blockIdx.y * blockSize;
     
-    // Calculate search window in block coordinates
-    int search_bx_start = 0; // leftmost block index in reference frame 
-    int search_bx_end = 0;   // rightmost block index in reference frame
-    int search_by_start = 0; // topmost block index in reference frame
-    int search_by_end = 0;   // bottommost block index in reference frame 
-    int search_w = 0;        // width of search window in blocks
-    int search_h = 0;        // height of search window in blocks
-    int total_positions = 0; // total candidate positions in search window
-    /*                                                              -
-       (search_bx_start, search_by_start)                           | 
-                                                                search_h
-                                (search_bx_end,search_by_end)       |
-                                                                    |
-        |---------------------------search_w-----------------|      -                           
-    */
-    // limit search window based on search range, cut to frame boundaries if necessary
-    if (searchRange > 0) { 
-        search_bx_start = max(0, (int)blockIdx.x - searchRange);  
-        search_bx_end = min((int)gridDim.x - 1, (int)blockIdx.x + searchRange); 
-        search_by_start = max(0, (int)blockIdx.y - searchRange); 
-        search_by_end = min((int)gridDim.y - 1, (int)blockIdx.y + searchRange);
-        search_w = search_bx_end - search_bx_start + 1;
-        search_h = search_by_end - search_by_start + 1;
-        total_positions = search_w * search_h;
-    } else { // full search 
-        search_bx_start = 0;
-        search_bx_end = gridDim.x - 1;
-        search_by_start = 0;
-        search_by_end = gridDim.y - 1;
-        search_w = gridDim.x;
-        search_h = gridDim.y;
-        total_positions = gridDim.x * gridDim.y;
-    }
-
+    // Calculate search window using helper function
+    CudaSearchBounds bounds = calculateCudaSearchBounds(blockIdx.x, blockIdx.y, gridDim.x, gridDim.y, searchRange);
     
     // Thread-local best match
     int best_sad = INT_MAX;
@@ -74,12 +43,12 @@ __global__ void fullSearchKernel(const unsigned char* d_curr, const unsigned cha
     int ref_y;
     int ref_x;
     // Each thread searches assigned positions
-    if (total_positions <= total_threads) { 
+    if (bounds.totalPositions <= total_threads) { 
         // Few positions: parallelize SAD along threads
-        if (tidx < total_positions) {
+        if (tidx < bounds.totalPositions) {
             // Convert position to 2D coordinates within search window
-            int ref_bx = search_bx_start + (tidx % search_w);
-            int ref_by = search_by_start + (tidx / search_w);
+            int ref_bx = bounds.startX + (tidx % bounds.width);
+            int ref_by = bounds.startY + (tidx / bounds.width);
             ref_x = ref_bx * blockSize;
             ref_y = ref_by * blockSize;
             
@@ -89,10 +58,10 @@ __global__ void fullSearchKernel(const unsigned char* d_curr, const unsigned cha
         }
     } else {
         // Many positions: each thread processes multiple positions in search window and finds local best match among them
-        for (int pos = tidx; pos < total_positions; pos += total_threads) {
+        for (int pos = tidx; pos < bounds.totalPositions; pos += total_threads) {
             // Convert position to 2D coordinates within search window
-            int ref_bx = search_bx_start + (pos % search_w);
-            int ref_by = search_by_start + (pos / search_w);
+            int ref_bx = bounds.startX + (pos % bounds.width);
+            int ref_by = bounds.startY + (pos / bounds.width);
             ref_x = ref_bx * blockSize;
             ref_y = ref_by * blockSize;
             
@@ -140,46 +109,31 @@ vector<vector<MotionVector>> fullSearchCUDANaiveGray(const ImageGray& curr, cons
                                                      int blockSize, int searchRange) {
     cudaSetDevice(0);
     
-    // Validate input: current and reference frames must have same dimensions
-    int frameSize = curr.width * curr.height;
-    if (frameSize != ref.width * ref.height) {
-        throw runtime_error("Current and reference frames must have the same dimensions.");
-    }
+    ValidationUtils::validateFrameDimensions(curr, ref);
     
-    size_t bytesPerFrame = frameSize * sizeof(unsigned char); // Grayscale: 1 byte per pixel 256 levels of gray
+    // Calculate grid dimensions
+    int blocksX, blocksY;
+    GridUtils::calculateGridDimensions(curr.width, curr.height, blockSize, blocksX, blocksY);
     
-    string searchModeStr = (searchRange > 0) ? ("Range search (range=" + to_string(searchRange) + " blocks)") : "Full search";
-    std::cout << "CUDA Naive (Grayscale): Processing frame " << curr.width << "x" << curr.height
-              << " with block size " << blockSize << std::endl;
+    // Log processing info
+    LoggingUtils::printFrameInfo("CUDA Naive", curr.width, curr.height, blockSize, blocksX, blocksY);
+    LoggingUtils::printSearchModeInfo("CUDA Naive", searchRange);
     
     // Allocate GPU memory for frames
-    unsigned char* d_curr = nullptr;    // GPU pointer matrix for current frame
-    unsigned char* d_ref = nullptr;     // GPU pointer matrix for reference frame 
-    gpuErrorCheck(cudaMalloc((void**)&d_curr, bytesPerFrame));
-    gpuErrorCheck(cudaMalloc((void**)&d_ref, bytesPerFrame));
+    unsigned char* d_curr = nullptr;
+    unsigned char* d_ref = nullptr;
+    size_t bytesPerFrame = 0;
+    GPUMemoryUtils::allocateFrames(curr, ref, d_curr, d_ref, bytesPerFrame);
     
-    // Copy frames to GPU
-    std::cout << "CUDA Naive (Grayscale): Copying frames to GPU..." << std::endl;
-    gpuErrorCheck(cudaMemcpy(d_curr, curr.data.data(), bytesPerFrame, cudaMemcpyHostToDevice));
-    gpuErrorCheck(cudaMemcpy(d_ref, ref.data.data(), bytesPerFrame, cudaMemcpyHostToDevice));
+    LoggingUtils::printCopyingToGPU("CUDA Naive");
+    GPUMemoryUtils::copyFramesToGPU(d_curr, d_ref, curr, ref, bytesPerFrame);
     
-    // Calculate grid dimension
-    int blocksX = curr.width / blockSize;   // Number of orizontal pixel divided by block size
-    int blocksY = curr.height / blockSize;  // Number of vertical pixel divided by block size
-    
-    std::cout << "CUDA Naive (Grayscale): Grid size: " << blocksX << "x" << blocksY
-              << " = " << (blocksX*blocksY) << " blocks" << std::endl;
-    std::cout << "CUDA Naive (Grayscale): Search mode: " << searchModeStr
-              << " (searchRange=" << searchRange << ")" << std::endl;
-
     // Allocate GPU memory for motion vectors
-    size_t mvSize = blocksX * blocksY * sizeof(MotionVector);
-    MotionVector* d_mv = nullptr;   // GPU pointer matrix for motion vectors (one per block in current frame) 
+    size_t mvSize = (size_t)blocksX * blocksY * sizeof(MotionVector);
+    MotionVector* d_mv = nullptr;
     gpuErrorCheck(cudaMalloc((void**)&d_mv, mvSize));
     
     // Determine threads per block (max 1024 threads per block on typical GPUs)
-    
-    
     int threadsPerBlockX = blocksX;
     int threadsPerBlockY = blocksY;
     if (searchRange > 0) {
@@ -196,65 +150,50 @@ vector<vector<MotionVector>> fullSearchCUDANaiveGray(const ImageGray& curr, cons
     }
     
     // Allocate GPU global memory for thread results
-    size_t threadResultsSize = blocksX * blocksY * threadsPerBlock * sizeof(int);
-    int* d_thread_sad = nullptr; // GPU pointer array for thread SAD results 
-    int* d_thread_dx = nullptr;  // GPU pointer array for thread dx results 
-    int* d_thread_dy = nullptr;  // GPU pointer array for thread dy results
-    // each thread writes its SAD, dx, and dy results to these arrays, which are later read by thread (0,0) of each block to find the global best match for that block
-    gpuErrorCheck(cudaMalloc((void**)&d_thread_sad, threadResultsSize)); // Each thread writes its SAD result to this array 
-    gpuErrorCheck(cudaMalloc((void**)&d_thread_dx, threadResultsSize)); // Each thread writes its dx result to this array
-    gpuErrorCheck(cudaMalloc((void**)&d_thread_dy, threadResultsSize)); // Each thread writes its dy result to this array
+    size_t threadResultsSize = (size_t)blocksX * blocksY * threadsPerBlock * sizeof(int);
+    int* d_thread_sad = nullptr;
+    int* d_thread_dx = nullptr;
+    int* d_thread_dy = nullptr;
+    gpuErrorCheck(cudaMalloc((void**)&d_thread_sad, threadResultsSize));
+    gpuErrorCheck(cudaMalloc((void**)&d_thread_dx, threadResultsSize));
+    gpuErrorCheck(cudaMalloc((void**)&d_thread_dy, threadResultsSize));
     
-    dim3 gridDim(blocksX, blocksY); // One block for each search block in current frame
-    dim3 blockDim(threadsPerBlockX, threadsPerBlockY);  // Each block has threadsPerBlockX × threadsPerBlockY threads 
+    dim3 gridDim(blocksX, blocksY);
+    dim3 blockDim(threadsPerBlockX, threadsPerBlockY);
     
-    std::cout << "CUDA Naive (Grayscale): Launching kernel with " << blockDim.x << "x" << blockDim.y 
-              << " threads per block (" << (blockDim.x * blockDim.y) << " total threads)..." << std::endl;
+    cout << "CUDA Naive (Grayscale): Launching kernel with " << blockDim.x << "x" << blockDim.y 
+        << " threads per block (" << (blockDim.x * blockDim.y) << " total threads)..." << endl;
     
-    // Create CUDA events for timing
-    cudaEvent_t start, stop;
-    createCudaEvent(start);
-    createCudaEvent(stop);
-    recordCudaEvent(start);
+    // Create CUDA timer
+    CudaTimer timer("Kernel execution");
+    timer.start();
     
     fullSearchKernel<<<gridDim, blockDim>>>(d_curr, d_ref, d_mv, blockSize,
                                             curr.width, d_thread_sad, 
                                             d_thread_dx, d_thread_dy, threadsPerBlock, searchRange);
     gpuErrorCheck(cudaGetLastError());
     
-    std::cout << "CUDA Naive (Grayscale): Kernel launched, synchronizing..." << std::endl;
+    cout << "CUDA Naive (Grayscale): Kernel launched, synchronizing..." << endl;
     gpuErrorCheck(cudaDeviceSynchronize());
     
-    recordCudaEvent(stop);
-    float milliseconds = elapsedCudaTime(start, stop);
-    std::cout << "CUDA Naive (Grayscale): Timing:" << std::endl;
-    std::cout << "  Kernel execution time: " << milliseconds << " ms" << std::endl;
-    destroyCudaEvent(start);
-    destroyCudaEvent(stop);
+    float milliseconds = timer.stop();
+    cout << "CUDA Naive (Grayscale): Timing:" << endl;
+    CudaTimingUtils::printKernelTiming("Kernel execution", milliseconds);
     
     // Copy results back to host
-    MotionVector* h_mv = new MotionVector[blocksX * blocksY];
-    gpuErrorCheck(cudaMemcpy(h_mv, d_mv, mvSize, cudaMemcpyDeviceToHost));
+    vector<MotionVector> h_mv(blocksX * blocksY);
+    GPUMemoryUtils::copyMotionVectorsFromGPU(h_mv, d_mv, blocksX, blocksY);
     
     // Convert flat array to 2D vector
-    vector<vector<MotionVector>> result(blocksY, vector<MotionVector>(blocksX));
-    for (int by = 0; by < blocksY; by++) {
-        for (int bx = 0; bx < blocksX; bx++) {
-            result[by][bx] = h_mv[by * blocksX + bx];
-        }
-    }
+    vector<vector<MotionVector>> result = GridUtils::flatTo2DVector(h_mv, blocksX, blocksY);
     
     // Cleanup
-    std::cout << "CUDA Naive (Grayscale): Cleaning up GPU memory..." << std::endl;
-    delete[] h_mv;
-    cudaFree(d_curr);
-    cudaFree(d_ref);
-    cudaFree(d_mv);
-    cudaFree(d_thread_sad);
+    LoggingUtils::printCleanupGPU("CUDA Naive");
+    GPUMemoryUtils::freeMemory(d_curr, d_ref, d_thread_sad, d_mv);
     cudaFree(d_thread_dx);
     cudaFree(d_thread_dy);
     
-    std::cout << "CUDA Naive (Grayscale): Complete!" << std::endl;
+    LoggingUtils::printProcessingComplete("CUDA Naive");
     return result;
 }
 

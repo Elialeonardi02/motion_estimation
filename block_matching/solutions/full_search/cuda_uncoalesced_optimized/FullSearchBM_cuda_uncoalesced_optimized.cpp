@@ -5,6 +5,7 @@
 #include <limits>
 #include <cuda_runtime.h>
 #include "FullSearchBM_cuda_uncoalesced_optimized.h"
+#include "utils.h"
 #include "cuda_utils.h"
 #include "sad_utils.h"
 
@@ -42,39 +43,8 @@ __global__ void fullSearchKernel(const unsigned char* d_curr, const unsigned cha
     const int x = blockIdx.x * blockSize;
     const int y = blockIdx.y * blockSize;
     
-     // Calculate search window in block coordinates
-    int search_bx_start = 0; // leftmost block index in reference frame 
-    int search_bx_end = 0;   // rightmost block index in reference frame
-    int search_by_start = 0; // topmost block index in reference frame
-    int search_by_end = 0;   // bottommost block index in reference frame 
-    int search_w = 0;        // width of search window in blocks
-    int search_h = 0;        // height of search window in blocks
-    int total_positions = 0; // total candidate positions in search window
-    /*                                                              -
-       (search_bx_start, search_by_start)                           | 
-                                                                search_h
-                                (search_bx_end,search_by_end)       |
-                                                                    |
-        |---------------------------search_w-----------------|      -                           
-    */
-    // limit search window based on search range, cut to frame boundaries if necessary
-    if (searchRange > 0) {
-        search_bx_start = max(0, (int)blockIdx.x - searchRange);
-        search_bx_end = min((int)gridDim.x - 1, (int)blockIdx.x + searchRange);
-        search_by_start = max(0, (int)blockIdx.y - searchRange);
-        search_by_end = min((int)gridDim.y - 1, (int)blockIdx.y + searchRange);
-        search_w = search_bx_end - search_bx_start + 1;
-        search_h = search_by_end - search_by_start + 1;
-        total_positions = search_w * search_h;
-    } else {
-        search_bx_start = 0;
-        search_bx_end = gridDim.x - 1;
-        search_by_start = 0;
-        search_by_end = gridDim.y - 1;
-        search_w = gridDim.x;
-        search_h = gridDim.y;
-        total_positions = gridDim.x * gridDim.y;
-    }
+    // Calculate search window using helper function
+    CudaSearchBounds bounds = calculateCudaSearchBounds(blockIdx.x, blockIdx.y, gridDim.x, gridDim.y, searchRange);
     
     // Thread-local best match
     int best_sad = INT_MAX; // Initialize best SAD with worst case
@@ -110,13 +80,13 @@ __global__ void fullSearchKernel(const unsigned char* d_curr, const unsigned cha
     const int pixelsPerThread = (blockSize * blockSize + blockDim.z - 1) / blockDim.z;
     
     // Each thread (X,Y,Z) searches positions and computes partial SAD along Z
-    if (total_positions <= threadsPerBlock) {
+    if (bounds.totalPositions <= threadsPerBlock) {
         // Few positions: each thread (X,Y) processes at most one position, parallelize SAD along Z
         int ref_bx = 0, ref_by = 0;
-        if (tidx_2d < total_positions) {
+        if (tidx_2d < bounds.totalPositions) {
             // Convert position to 2D coordinates within search window
-            ref_bx = search_bx_start + (tidx_2d % search_w);
-            ref_by = search_by_start + (tidx_2d / search_w);
+            ref_bx = bounds.startX + (tidx_2d % bounds.width);
+            ref_by = bounds.startY + (tidx_2d / bounds.width);
 
             shared_block_thread_sad_partial[tidx_3d] = computeSAD_device_partial(
                 s_curr, d_ref, ref_bx * blockSize, ref_by * blockSize, blockSize, width,
@@ -137,17 +107,17 @@ __global__ void fullSearchKernel(const unsigned char* d_curr, const unsigned cha
         }
         
         // Thread z=0 has complete SAD for this position
-        if (threadIdx.z == 0 && tidx_2d < total_positions) {
+        if (threadIdx.z == 0 && tidx_2d < bounds.totalPositions) {
             best_sad = shared_block_thread_sad_partial[tidx_3d];
             best_dx = ref_bx - (int)blockIdx.x;
             best_dy = ref_by - (int)blockIdx.y;
         }
     } else {
         // Many positions: each thread (X,Y) processes multiple positions, parallelize SAD along Z for each position
-        for (int pos = tidx_2d; pos < total_positions; pos += threadsXY) {
+        for (int pos = tidx_2d; pos < bounds.totalPositions; pos += threadsXY) {
             // Convert position to 2D coordinates within search window
-            int ref_bx = search_bx_start + (pos % search_w);
-            int ref_by = search_by_start + (pos / search_w);
+            int ref_bx = bounds.startX + (pos % bounds.width);
+            int ref_by = bounds.startY + (pos / bounds.width);
 
             shared_block_thread_sad_partial[tidx_3d] = computeSAD_device_partial(
                 s_curr, d_ref, ref_bx * blockSize, ref_by * blockSize, blockSize, width,
@@ -232,57 +202,45 @@ __global__ void fullSearchKernel(const unsigned char* d_curr, const unsigned cha
                                                                     int blockSize, int searchRange) {
     cudaSetDevice(0);
     
-    // Validate input: current and reference frames must have same dimensions
-    int frameSize = curr.width * curr.height;
-    if (frameSize != ref.width * ref.height) {
-        throw runtime_error("Current and reference frames must have the same dimensions.");
-    }
-    
-    size_t bytesPerFrame = frameSize * sizeof(unsigned char); // Grayscale: 1 byte per pixel 256 levels of gray
-    
-    string searchModeStr = (searchRange > 0) ? ("Range search (range=" + to_string(searchRange) + " blocks)") : "Full search";
-    std::cout << "CUDA Uncoalesced Optimized (Grayscale): Processing frame " << curr.width << "x" << curr.height
-              << " with block size " << blockSize << std::endl;
-    
-    // Allocate and copy frames to GPU
-    unsigned char* d_curr = nullptr;
-    unsigned char* d_ref = nullptr;
-    gpuErrorCheck(cudaMalloc((void**)&d_curr, bytesPerFrame));
-    gpuErrorCheck(cudaMalloc((void**)&d_ref, bytesPerFrame));
-    
-    // Copy frames to GPU
-    std::cout << "CUDA Uncoalesced Optimized (Grayscale): Copying frames to GPU..." << std::endl;
-    gpuErrorCheck(cudaMemcpy(d_curr, curr.data.data(), bytesPerFrame, cudaMemcpyHostToDevice));
-    gpuErrorCheck(cudaMemcpy(d_ref, ref.data.data(), bytesPerFrame, cudaMemcpyHostToDevice));
+    ValidationUtils::validateFrameDimensions(curr, ref);
     
     // Calculate grid dimensions
-    int blocksX = curr.width / blockSize;
-    int blocksY = curr.height / blockSize;
+    int blocksX, blocksY;
+    GridUtils::calculateGridDimensions(curr.width, curr.height, blockSize, blocksX, blocksY);
     
-    std::cout << "CUDA Uncoalesced Optimized (Grayscale): Grid size: " << blocksX << "x" << blocksY
-              << " = " << (blocksX*blocksY) << " blocks" << std::endl;
-    std::cout << "CUDA Uncoalesced Optimized (Grayscale): Search mode: " << searchModeStr
-              << " (searchRange=" << searchRange << ")" << std::endl;
-
+    // Log processing info
+    LoggingUtils::printFrameInfo("CUDA Uncoalesced Optimized", curr.width, curr.height, blockSize, blocksX, blocksY);
+    LoggingUtils::printSearchModeInfo("CUDA Uncoalesced Optimized", searchRange);
+    
+    // Allocate GPU memory for frames
+    unsigned char* d_curr = nullptr;
+    unsigned char* d_ref = nullptr;
+    size_t bytesPerFrame = 0;
+    GPUMemoryUtils::allocateFrames(curr, ref, d_curr, d_ref, bytesPerFrame);
+    
+    LoggingUtils::printCopyingToGPU("CUDA Uncoalesced Optimized");
+    GPUMemoryUtils::copyFramesToGPU(d_curr, d_ref, curr, ref, bytesPerFrame);
+    
     // Allocate GPU memory for motion vectors
-    size_t mvSize = blocksX * blocksY * sizeof(MotionVector);
-    MotionVector* d_mv = nullptr;   // GPU pointer matrix for motion vectors (one per block in current frame) 
+    size_t mvSize = (size_t)blocksX * blocksY * sizeof(MotionVector);
+    MotionVector* d_mv = nullptr;
     gpuErrorCheck(cudaMalloc((void**)&d_mv, mvSize));
     
-    // Determine threads per block based on the grid dimension 
+    // Determine threads per block based on device properties 
     cudaDeviceProp prop;
     cudaGetDeviceProperties(&prop, 0);
     int maxThreadsPerBlock = prop.maxThreadsPerBlock;
-    int threadsPerBlockX= blocksX;
+    int threadsPerBlockX = blocksX;
     int threadsPerBlockY = blocksY;
     int threadsPerBlockZ;
+    
     if (searchRange > 0) {
         threadsPerBlockX = min(blocksX, searchRange * 2 + 1);
         threadsPerBlockY = min(blocksY, searchRange * 2 + 1);
     }
 
     if (threadsPerBlockX * threadsPerBlockY <= maxThreadsPerBlock) {
-        threadsPerBlockZ = min(64, maxThreadsPerBlock / (threadsPerBlockX * threadsPerBlockY)); // Use Z dimension for SAD parallelization, up to 64 threads (typical warp size) or as many as possible within max threads per block
+        threadsPerBlockZ = min(64, maxThreadsPerBlock / (threadsPerBlockX * threadsPerBlockY));
     } else {
         // FIXME review dimensions for large blocks to bnetter optimization
         threadsPerBlockX = 16;
@@ -294,54 +252,41 @@ __global__ void fullSearchKernel(const unsigned char* d_curr, const unsigned cha
     dim3 gridDim(blocksX, blocksY);
     dim3 blockDim(threadsPerBlockX, threadsPerBlockY, threadsPerBlockZ);
     
-    std::cout << "CUDA Uncoalesced Optimized (Grayscale): Launching kernel with " << blockDim.x << "x" << blockDim.y << "x" << blockDim.z
-              << " threads per block (" << threadsPerBlock << " total threads)..." << std::endl;
+    cout << "CUDA Uncoalesced Optimized (Grayscale): Launching kernel with " << blockDim.x << "x" << blockDim.y << "x" << blockDim.z
+        << " threads per block (" << threadsPerBlock << " total threads)..." << endl;
     
-    // Create CUDA events for timing
-    cudaEvent_t start, stop;
-    createCudaEvent(start);
-    createCudaEvent(stop);
-    recordCudaEvent(start);
+    // Create CUDA timer
+    CudaTimer timer("Kernel execution");
+    timer.start();
     
-    // Allocate shared memory for current block + partial SAD + reduction buffers
-    // sad_partial: threadsPerBlock (for Z reduction)
-    // sad/dx/dy/dist: threadsXY = threadsPerBlock / blockDim.z (for 2D reduction, z=0 threads only)
-    size_t sharedMemSize = blockSize * blockSize * sizeof(unsigned char) +           // Current block pixels
-                           threadsPerBlock * sizeof(int) +                           // sad_partial
-                           (4 * blockDim.x * blockDim.y) * sizeof(int);                       // sad/dx/dy/dist
+    // Allocate shared memory
+    size_t sharedMemSize = blockSize * blockSize * sizeof(unsigned char) +
+                           threadsPerBlock * sizeof(int) +
+                           (4 * blockDim.x * blockDim.y) * sizeof(int);
     
     fullSearchKernel<<<gridDim, blockDim, sharedMemSize>>>(d_curr, d_ref, d_mv, blockSize,
                                             curr.width, threadsPerBlock, searchRange);
     gpuErrorCheck(cudaGetLastError());
     
-    std::cout << "CUDA Uncoalesced Optimized (Grayscale): Kernel launched, synchronizing..." << std::endl;
+    cout << "CUDA Uncoalesced Optimized (Grayscale): Kernel launched, synchronizing..." << endl;
     gpuErrorCheck(cudaDeviceSynchronize());
     
-    recordCudaEvent(stop);
-    float milliseconds = elapsedCudaTime(start, stop);
-    std::cout << "CUDA Uncoalesced Optimized (Grayscale): Timing:" << std::endl;
-    std::cout << "  Kernel execution time: " << milliseconds << " ms" << std::endl;
-    destroyCudaEvent(start);
-    destroyCudaEvent(stop);
+    float milliseconds = timer.stop();
+    cout << "CUDA Uncoalesced Optimized (Grayscale): Timing:" << endl;
+    CudaTimingUtils::printKernelTiming("Kernel execution", milliseconds);
     
     // Copy results back to host
-    MotionVector* h_mv = new MotionVector[blocksX * blocksY];
-    gpuErrorCheck(cudaMemcpy(h_mv, d_mv, mvSize, cudaMemcpyDeviceToHost));
+    vector<MotionVector> h_mv(blocksX * blocksY);
+    GPUMemoryUtils::copyMotionVectorsFromGPU(h_mv, d_mv, blocksX, blocksY);
     
     // Convert flat array to 2D vector
-    vector<vector<MotionVector>> result(blocksY, vector<MotionVector>(blocksX));
-    for (int by = 0; by < blocksY; by++)
-        for (int bx = 0; bx < blocksX; bx++)
-            result[by][bx] = h_mv[by * blocksX + bx];
+    vector<vector<MotionVector>> result = GridUtils::flatTo2DVector(h_mv, blocksX, blocksY);
     
     // Cleanup
-    std::cout << "CUDA Uncoalesced Optimized (Grayscale): Cleaning up GPU memory..." << std::endl;
-    delete[] h_mv;
-    cudaFree(d_curr);
-    cudaFree(d_ref);
-    cudaFree(d_mv);
-
-    std::cout << "CUDA Uncoalesced Optimized (Grayscale): Complete!" << std::endl;
+    LoggingUtils::printCleanupGPU("CUDA Uncoalesced Optimized");
+    GPUMemoryUtils::freeMemory(d_curr, d_ref, d_mv);
+    
+    LoggingUtils::printProcessingComplete("CUDA Uncoalesced Optimized");
     return result;
 }
 

@@ -33,6 +33,10 @@ COMMON_OBJECTS  = $(BUILD_DIR)/main.o \
                   $(BUILD_DIR)/utils.o \
                   $(BUILD_DIR)/blockMatchingFactory.o
 
+ifdef HAVE_CUDA
+  COMMON_OBJECTS += $(BUILD_DIR)/cuda_utils.o
+endif
+
 FSEARCH_OBJECTS = $(BUILD_DIR)/fullSearchBM_cpu_naive.o
 
 LSEARCH_CPU_OBJECTS = $(BUILD_DIR)/logarithmicSearchBM_cpu_naive.o
@@ -74,6 +78,9 @@ $(BUILD_DIR)/utils.o: $(COMMON_SRC)/utils.cpp | $(BUILD_DIR)
 
 $(BUILD_DIR)/blockMatchingFactory.o: $(COMMON_SRC)/blockMatchingFactory.cpp | $(BUILD_DIR)
 	g++ $(CXXFLAGS) $(INCLUDE_DIRS) -c $< -o $@
+
+$(BUILD_DIR)/cuda_utils.o: $(COMMON_SRC)/cuda_utils.cpp | $(BUILD_DIR)
+	$(NVXX) $(NVXXFLAGS) $(NVOPTFLAGS) $(INCLUDE_DIRS) $< -c -o $@
 
 # Compile CPU implementations with g++
 $(BUILD_DIR)/fullSearchBM_cpu_naive.o: $(FSEARCH_CPU_SRC)/fullSearchBM_cpu_naive.cpp | $(BUILD_DIR)
