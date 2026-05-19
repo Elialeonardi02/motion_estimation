@@ -7,11 +7,7 @@
 #include "FullSearchBM_cuda_optimized.h"
 #include "cuda_utils.h"
 #include "sad_utils.h"
-#include "logging_utils.h"
-#include "grid_utils.h"
-#include "validation_utils.h"
-#include "gpu_memory_utils.h"
-#include "cuda_timing_utils.h"
+#include "utils.h"
 
 using namespace std;
 
@@ -45,7 +41,7 @@ __global__ void computeSADKernel(const unsigned char*  d_curr,const unsigned cha
     const int ref_y = (bounds.startY + (blockIdx.z / bounds.width)) * blockSize;  // candidate block's top-left corner in the reference frame in pixels
     // blockIdx.z selects which candidate (in block coordinates) is loaded from the reference frame
     
-    // shared memory 
+    // load shared memory 
     extern  __shared__ unsigned char smem[];             
     unsigned char* s_curr = smem;                           // shared memory for current block pixels
     unsigned char* s_ref = s_curr + pixelsPerBlock;         // shared memory for reference block pixels
@@ -61,7 +57,8 @@ __global__ void computeSADKernel(const unsigned char*  d_curr,const unsigned cha
         s_ref[i] = __ldg(&d_ref[(ref_y + py) * width + (ref_x + px)]);  // load reference block pixel (_ldg read-only cache optimization)
     }
 
-    __syncthreads();
+    __syncthreads();1.	
+
 
     // partial sad computation for each thread
     int partial_sad = 0;
@@ -80,17 +77,19 @@ __global__ void computeSADKernel(const unsigned char*  d_curr,const unsigned cha
         }
         __syncthreads();
     }
-    // FIXME can be stride? 
     if (threadIdx.x == 0) { // thread 0 writes the final SAD for this candidate position to global memory
         d_sad[(blockIdx.y* gridDim.x + blockIdx.x)* gridDim.z + blockIdx.z] = s_partial_sad[0]; 
     }
 }
  
 // Finds the best motion vector for each block by selecting the search position with the minimum SAD
-__global__ void findBestMVKernel(const int* d_sad, MotionVector* d_mv, int searchRange){
+__global__ void findBestMVKernel(const int* d_sad, MotionVector* d_mv, int maxCandidates, int searchRange){
     CudaSearchBounds bounds = calculateCudaSearchBounds(blockIdx.x, blockIdx.y, gridDim.x, gridDim.y, searchRange);
 
-    const int base = (blockIdx.y * gridDim.x + blockIdx.x) * bounds.totalPositions;
+    // Use maxCandidates for indexing, not bounds.totalPositions
+    // because d_sad array is allocated as blocksX * blocksY * maxCandidates
+    // gridDim.z would be 1 (2D launch grid), so we must use the maxCandidates parameter
+    const int base = (blockIdx.y * gridDim.x + blockIdx.x) * maxCandidates;
 
     // local best for each thread
     int local_best_sad = INT_MAX;
@@ -123,20 +122,25 @@ __global__ void findBestMVKernel(const int* d_sad, MotionVector* d_mv, int searc
     s_dist[threadIdx.x] = local_best_dist;
     __syncthreads();
 
-    for (int stride = blockDim.x >> 1; stride > 0; stride >>= 1) {
-        if (threadIdx.x < stride) {
-            if (s_sad[threadIdx.x + stride] < s_sad[threadIdx.x] || 
-                (s_sad[threadIdx.x + stride] == s_sad[threadIdx.x] && s_dist[threadIdx.x + stride] < s_dist[threadIdx.x])) {
-                s_sad[threadIdx.x] = s_sad[threadIdx.x + stride];
-                s_dx[threadIdx.x] = s_dx[threadIdx.x + stride];
-                s_dy[threadIdx.x] = s_dy[threadIdx.x + stride];
-                s_dist[threadIdx.x] = s_dist[threadIdx.x + stride];
-            }
-        }// each thread load 1 or a number of pixels that is a multiple of 32 to ensure coalescing, rounding up if needed
-        __syncthreads(); // FIXME is always needed to synchronize?
-    }
+    // Sequential reduction by thread 0
+    // NOTE: Comparison-based reductions with tie-breaking are non-associative and difficult
+    // to parallelize correctly. The sequential approach in SMEM is simpler and guaranteed correct.
     if (threadIdx.x == 0) {
-        d_mv[blockIdx.y * gridDim.x + blockIdx.x] = {s_dx[0], s_dy[0]};
+        int global_best_sad = s_sad[0];
+        int global_best_dx = s_dx[0];
+        int global_best_dy = s_dy[0];
+        int global_best_dist = s_dist[0];
+        
+        for (int i = 1; i < blockDim.x; i++) {
+            if (s_sad[i] < global_best_sad ||
+                (s_sad[i] == global_best_sad && s_dist[i] < global_best_dist)) {
+                global_best_sad = s_sad[i];
+                global_best_dx = s_dx[i];
+                global_best_dy = s_dy[i];
+                global_best_dist = s_dist[i];
+            }
+        }
+        d_mv[blockIdx.y * gridDim.x + blockIdx.x] = {global_best_dx, global_best_dy};
     }
 }
 
@@ -175,6 +179,7 @@ vector<vector<MotionVector>> fullSearchCUDAOptimizedGray(const ImageGray& curr, 
          << "  maxThreadsPerBlock: " << deviceProp.maxThreadsPerBlock << "\n"
          << "  sharedMemPerBlock: " << deviceProp.sharedMemPerBlock << " bytes\n";
     
+    // SMEM configuration and threads per block selection
     int threadsPerBlock = 32;
     size_t smKSad, smKBestMV;
         
@@ -266,7 +271,7 @@ vector<vector<MotionVector>> fullSearchCUDAOptimizedGray(const ImageGray& curr, 
          << blockDim.x << "x" << blockDim.y << "x" << blockDim.z
          << " threads per block (" << threadsPerBlock << " total threads)..." << endl;
 
-    findBestMVKernel<<<gridKBestMV, blockDim, smKBestMV>>>(d_sad, d_mv, searchRange);
+    findBestMVKernel<<<gridKBestMV, blockDim, smKBestMV>>>(d_sad, d_mv, maxCandidates, searchRange);
     gpuErrorCheck(cudaGetLastError());
     recordCudaEvent(evKBestMVStop);
     recordCudaEvent(evTotalStop);
