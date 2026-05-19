@@ -26,6 +26,9 @@ OUTPUT_DIR      = output
 # Executable name
 EXECUTABLE      = block_matching
 
+# Check if nvcc is available 
+HAVE_CUDA := $(shell command -v nvcc 2> /dev/null)
+
 # Object files
 COMMON_OBJECTS  = $(BUILD_DIR)/main.o \
                   $(BUILD_DIR)/imageIO.o \
@@ -44,10 +47,6 @@ LSEARCH_CPU_OBJECTS = $(BUILD_DIR)/logarithmicSearchBM_cpu_naive.o
 FSEARCH_CUDA_OBJECTS = $(BUILD_DIR)/FullSearchBM_cuda_naive.o \
 					   $(BUILD_DIR)/FullSearchBM_cuda_optimized.o \
 					   $(BUILD_DIR)/FullSearchBM_cuda_uncoalesced_optimized.o
-
-
-# Check if nvcc is available
-HAVE_CUDA := $(shell command -v nvcc 2> /dev/null)
 
 ifdef HAVE_CUDA
   ALL_OBJECTS = $(COMMON_OBJECTS) $(FSEARCH_OBJECTS) $(LSEARCH_CPU_OBJECTS) $(FSEARCH_CUDA_OBJECTS)
