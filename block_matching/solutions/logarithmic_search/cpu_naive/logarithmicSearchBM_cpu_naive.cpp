@@ -22,8 +22,8 @@ vector<vector<MotionVector>> logarithmicSearchCPUNaiveGray(const ImageGray& curr
     cout << "CPU Naive (Logarithmic Search): Search strategy: Logarithmic search (distance="
         << distance << " blocks)" << endl;
 
-    for(int by = 0; by < blocksY; by++) {
-        for(int bx = 0; bx < blocksX; bx++) {
+    for(int bx = 0; bx < blocksX; bx++) {
+        for(int by = 0; by < blocksY; by++) {
             // Top-left corner of current block: (x, y) = (bx * blockSize, by * blockSize)
             int x = bx * blockSize;
             int y = by * blockSize;
@@ -65,14 +65,14 @@ vector<vector<MotionVector>> logarithmicSearchCPUNaiveGray(const ImageGray& curr
                 cy += iterBestDY * blockSize;
             }
             
-            mv[by][bx] = {(cx - x) / blockSize, (cy - y) / blockSize};
+            mv[bx][by] = {(cx - x) / blockSize, (cy - y) / blockSize};
         }
         
-        // Progress every 10 rows
-        if((by + 1) % 10 == 0 || by == blocksY - 1) {
+        // Progress every 10 columns
+        if((bx + 1) % 10 == 0 || bx == blocksX - 1) {
             auto current_time = chrono::high_resolution_clock::now();
             chrono::duration<double> elapsed = current_time - start_time;
-            int processed = (by + 1) * blocksX;
+            int processed = (bx + 1) * blocksY;
             int total = blocksX * blocksY;
             LoggingUtils::printProgressUpdate("CPU Naive (Logarithmic)", processed, total, elapsed.count());
         }

@@ -11,8 +11,15 @@
 
 using namespace std;
 
+// Structure to hold thread results (both in shared and global memory)
+struct ThreadResult {
+    int sad;
+    int dx;
+    int dy;
+};
+
 // Device function to compute PARTIAL SAD for a subset of pixels
-// Each thread along Z (if is not 1) dimension computes SAD for a portion of pixels, then results are reduced
+// Each thread along dimension computes SAD for a portion of pixels, then results are reduced
 static __device__ int computeSAD_device_partial(const unsigned char* curr, const unsigned char* ref,
                                                 int x2, int y2, int blockSize, int refWidth,
                                                 int startPixel, int pixelsPerThread) {
@@ -56,10 +63,7 @@ __global__ void fullSearchKernel(const unsigned char* d_curr, const unsigned cha
     int threadsXY = blockDim.x * blockDim.y;
     
     int* shared_block_thread_sad_partial = (int*)(s_curr + blockSize * blockSize); // buffer for partial SAD results from each thread (size = threadsPerBlock)
-    int* shared_block_thread_sad = (int*)(shared_block_thread_sad_partial + threadsPerBlock); // buffer for final SAD results from each thread after reduction (size = threadsXY)
-    int* shared_block_thread_dx = shared_block_thread_sad + threadsXY; // buffer for dx results corresponding to SAD results (size = threadsXY)
-    int* shared_block_thread_dy = shared_block_thread_dx + threadsXY; // buffer for dy results corresponding to SAD results (size = threadsXY)
-    int* shared_block_thread_dist = shared_block_thread_dy + threadsXY; // buffer for distance results corresponding to SAD results (size = threadsXY)
+    ThreadResult* shared_block_thread_results = (ThreadResult*)(shared_block_thread_sad_partial + threadsPerBlock); // buffer for thread results (size = threadsXY)
     
     // Load current block in shared memory
     for (int i = tidx_3d; i < blockSize * blockSize; i += threadsPerBlock) {
@@ -68,10 +72,7 @@ __global__ void fullSearchKernel(const unsigned char* d_curr, const unsigned cha
     
     // Initialize shared memory for reduction buffers (z=0 threads only)
     if (threadIdx.z == 0) {
-        shared_block_thread_sad[tidx_2d] = INT_MAX;
-        shared_block_thread_dx[tidx_2d] = 0;
-        shared_block_thread_dy[tidx_2d] = 0;
-        shared_block_thread_dist[tidx_2d] = 0;
+        shared_block_thread_results[tidx_2d] = {INT_MAX, 0, 0};
     }
 
     __syncthreads();
@@ -80,114 +81,66 @@ __global__ void fullSearchKernel(const unsigned char* d_curr, const unsigned cha
     const int pixelsPerThread = (blockSize * blockSize + blockDim.z - 1) / blockDim.z;
     
     // Each thread (X,Y,Z) searches positions and computes partial SAD along Z
-    if (bounds.totalPositions <= threadsPerBlock) {
-        // Few positions: each thread (X,Y) processes at most one position, parallelize SAD along Z
-        int ref_bx = 0, ref_by = 0;
-        if (tidx_2d < bounds.totalPositions) {
-            // Convert position to 2D coordinates within search window
-            ref_bx = bounds.startX + (tidx_2d % bounds.width);
-            ref_by = bounds.startY + (tidx_2d / bounds.width);
+    // threadsXY < totalPosition, threadsZ handles partial SAD for its assigned positions (i, i+threadsXY, i+2*threadsXY, ...), then reduction along Z gives total SAD for that position
+    // threadsXY = totalPosition, threads along Z dimension compute partial SAD for only one assigned position.
+    for (int pos = tidx_2d; pos < bounds.totalPositions; pos += threadsXY) {
+        // Convert position to 2D coordinates within search window
+        int ref_bx = bounds.startX + (pos % bounds.width);
+        int ref_by = bounds.startY + (pos / bounds.width);
 
-            shared_block_thread_sad_partial[tidx_3d] = computeSAD_device_partial(
-                s_curr, d_ref, ref_bx * blockSize, ref_by * blockSize, blockSize, width,
-                threadIdx.z * pixelsPerThread, pixelsPerThread);
-        } else {
-            shared_block_thread_sad_partial[tidx_3d] = 0; // Threads with no position to process contribute 0 to SAD sum
-        }
-        
+        shared_block_thread_sad_partial[tidx_3d] = computeSAD_device_partial(
+            s_curr, d_ref, ref_bx * blockSize, ref_by * blockSize, blockSize, width,
+            threadIdx.z * pixelsPerThread, pixelsPerThread);
+
         __syncthreads();
         
-        // Reduce along Z: sum partial SADs
+        // Reduce along Z
         for (int stride = 1; stride < blockDim.z; stride *= 2) {
             if (threadIdx.z + stride < blockDim.z) {
                 // Add SAD from neighbor thread in Z dimension
-                shared_block_thread_sad_partial[tidx_3d] += shared_block_thread_sad_partial[tidx_3d + stride * threadsXY]; 
+                shared_block_thread_sad_partial[tidx_3d] += shared_block_thread_sad_partial[tidx_3d + stride * threadsXY];
             }
             __syncthreads();
         }
         
         // Thread z=0 has complete SAD for this position
-        if (threadIdx.z == 0 && tidx_2d < bounds.totalPositions) {
-            best_sad = shared_block_thread_sad_partial[tidx_3d];
-            best_dx = ref_bx - (int)blockIdx.x;
-            best_dy = ref_by - (int)blockIdx.y;
-        }
-    } else {
-        // Many positions: each thread (X,Y) processes multiple positions, parallelize SAD along Z for each position
-        for (int pos = tidx_2d; pos < bounds.totalPositions; pos += threadsXY) {
-            // Convert position to 2D coordinates within search window
-            int ref_bx = bounds.startX + (pos % bounds.width);
-            int ref_by = bounds.startY + (pos / bounds.width);
-
-            shared_block_thread_sad_partial[tidx_3d] = computeSAD_device_partial(
-                s_curr, d_ref, ref_bx * blockSize, ref_by * blockSize, blockSize, width,
-                threadIdx.z * pixelsPerThread, pixelsPerThread);
-
-            __syncthreads();
-            
-            // Reduce along Z
-            for (int stride = 1; stride < blockDim.z; stride *= 2) {
-                if (threadIdx.z + stride < blockDim.z) {
-                    // Add SAD from neighbor thread in Z dimension
-                    shared_block_thread_sad_partial[tidx_3d] += shared_block_thread_sad_partial[tidx_3d + stride * threadsXY];
-                }
-                __syncthreads();
-            }
-            
-            // Thread z=0 has complete SAD for this position
-            if (threadIdx.z == 0) {
-                int sad = shared_block_thread_sad_partial[tidx_3d];
-                int ref_dx = ref_bx - (int)blockIdx.x;
-                int ref_dy = ref_by - (int)blockIdx.y;
-                int dist = ref_dx * ref_dx + ref_dy * ref_dy;  // Distance in blocks²
-                int best_dist = best_dx * best_dx + best_dy * best_dy;
-                if (sad < best_sad || (sad == best_sad && dist < best_dist)) {
-                    best_sad = sad;
-                    best_dx = ref_dx;
-                    best_dy = ref_dy;
-                }
+        if (threadIdx.z == 0) {
+            int sad = shared_block_thread_sad_partial[tidx_3d];
+            int ref_dx = ref_bx - (int)blockIdx.x;
+            int ref_dy = ref_by - (int)blockIdx.y;
+            int dist = ref_dx * ref_dx + ref_dy * ref_dy;  // Distance in blocks for tie-breaking
+            int best_dist = best_dx * best_dx + best_dy * best_dy;
+            if (sad < best_sad || (sad == best_sad && dist < best_dist)) {
+                best_sad = sad;
+                best_dx = ref_dx;
+                best_dy = ref_dy;
             }
         }
     }
     
     // Write thread result to shared memory (z=0 threads only)
     if (threadIdx.z == 0) {
-        shared_block_thread_sad[tidx_2d] = best_sad;
-        shared_block_thread_dx[tidx_2d] = best_dx;
-        shared_block_thread_dy[tidx_2d] = best_dy;
-        shared_block_thread_dist[tidx_2d] = best_dx * best_dx + best_dy * best_dy;
+        shared_block_thread_results[tidx_2d] = {best_sad, best_dx, best_dy};
     }
     
     __syncthreads();
 
     // Find global best among all z=0 threads in this block (thread 0 only)
-    // Only consider threads that have valid matches (not INT_MAX)
     if (threadIdx.z == 0 && tidx_2d == 0) {
         int global_best_sad = INT_MAX;
         int global_best_dx = 0, global_best_dy = 0;
         int global_best_dist = INT_MAX;
         
-        // First pass: find any valid match to initialize global_best
+        // Find best among all valid matches
         for (int i = 0; i < threadsXY; i++) {
-            if (shared_block_thread_sad[i] < INT_MAX) {
-                global_best_sad = shared_block_thread_sad[i];
-                global_best_dx = shared_block_thread_dx[i];
-                global_best_dy = shared_block_thread_dy[i];
-                global_best_dist = shared_block_thread_dist[i];
-                break;  // Found first valid, proceed to second pass
-            }
-        }
-        
-        // Second pass: find best among all valid matches
-        for (int i = 0; i < threadsXY; i++) {
-            if (shared_block_thread_sad[i] < INT_MAX) {
-                int dist = shared_block_thread_dx[i] * shared_block_thread_dx[i] + 
-                           shared_block_thread_dy[i] * shared_block_thread_dy[i];
-                if (shared_block_thread_sad[i] < global_best_sad || 
-                    (shared_block_thread_sad[i] == global_best_sad && dist < global_best_dist)) {
-                    global_best_sad = shared_block_thread_sad[i];
-                    global_best_dx = shared_block_thread_dx[i];
-                    global_best_dy = shared_block_thread_dy[i];
+            if (shared_block_thread_results[i].sad < INT_MAX) {
+                int dist = shared_block_thread_results[i].dx * shared_block_thread_results[i].dx + 
+                           shared_block_thread_results[i].dy * shared_block_thread_results[i].dy;
+                if (shared_block_thread_results[i].sad < global_best_sad || 
+                    (shared_block_thread_results[i].sad == global_best_sad && dist < global_best_dist)) {
+                    global_best_sad = shared_block_thread_results[i].sad;
+                    global_best_dx = shared_block_thread_results[i].dx;
+                    global_best_dy = shared_block_thread_results[i].dy;
                     global_best_dist = dist;
                 }
             }
@@ -221,10 +174,6 @@ __global__ void fullSearchKernel(const unsigned char* d_curr, const unsigned cha
     LoggingUtils::printCopyingToGPU("CUDA Uncoalesced Optimized");
     GPUMemoryUtils::copyFramesToGPU(d_curr, d_ref, curr, ref, bytesPerFrame);
     
-    // Allocate GPU memory for motion vectors
-    size_t mvSize = (size_t)blocksX * blocksY * sizeof(MotionVector);
-    MotionVector* d_mv = nullptr;
-    gpuErrorCheck(cudaMalloc((void**)&d_mv, mvSize));
     
     // Determine threads per block based on device properties 
     cudaDeviceProp prop;
@@ -249,6 +198,11 @@ __global__ void fullSearchKernel(const unsigned char* d_curr, const unsigned cha
     }
     int threadsPerBlock = threadsPerBlockX * threadsPerBlockY * threadsPerBlockZ;
 
+    // Allocate GPU memory for motion vectors
+    size_t mvSize = (size_t)blocksX * blocksY * sizeof(MotionVector);
+    MotionVector* d_mv = nullptr;
+    gpuErrorCheck(cudaMalloc((void**)&d_mv, mvSize));
+    
     dim3 gridDim(blocksX, blocksY);
     dim3 blockDim(threadsPerBlockX, threadsPerBlockY, threadsPerBlockZ);
     
@@ -262,7 +216,7 @@ __global__ void fullSearchKernel(const unsigned char* d_curr, const unsigned cha
     // Allocate shared memory
     size_t sharedMemSize = blockSize * blockSize * sizeof(unsigned char) +
                            threadsPerBlock * sizeof(int) +
-                           (4 * blockDim.x * blockDim.y) * sizeof(int);
+                           (blockDim.x * blockDim.y) * sizeof(ThreadResult);
     
     fullSearchKernel<<<gridDim, blockDim, sharedMemSize>>>(d_curr, d_ref, d_mv, blockSize,
                                             curr.width, threadsPerBlock, searchRange);

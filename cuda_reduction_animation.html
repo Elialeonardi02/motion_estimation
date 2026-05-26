@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <title>CUDA Reduction Along Z - SAD Computation</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&display=swap');
+
+        body {
+            background-color: #f1f5f9; 
+            display: flex; justify-content: center; align-items: center;
+            height: 100vh; margin: 0; font-family: 'Fira Code', monospace;
+            overflow: hidden;
+        }
+
+        .presentation-window {
+            background: #ffffff; border: 1px solid #e2e8f0; border-radius: 20px;
+            padding: 40px 50px; box-shadow: 0 10px 40px rgba(0,0,0,0.05);
+            display: flex; flex-direction: column; align-items: center; gap: 35px;
+            max-width: 1250px;
+        }
+
+        .title-pill {
+            font-family: 'Outfit', sans-serif; font-size: 16px; font-weight: 700;
+            background: #fef9c3; color: #ca8a04; padding: 10px 28px;
+            border-radius: 50px; text-transform: uppercase; letter-spacing: 1px;
+        }
+
+        .frame-label {
+            font-family: 'Outfit', sans-serif; font-size: 16px; font-weight: 700; color: #475569;
+            margin-bottom: 15px; text-align: center;
+        }
+
+        .layout-container {
+            display: flex; gap: 40px; align-items: flex-start; width: 100%; justify-content: center;
+        }
+
+        .raw-grid-container {
+            display: flex; flex-direction: column; align-items: center;
+        }
+
+        .grid-frame {
+            display: grid; grid-template-columns: repeat(8, 25px); grid-template-rows: repeat(8, 25px);
+            border: 2px solid #cbd5e1; position: relative; background: #000000;
+            border-radius: 4px; overflow: hidden;
+        }
+
+        .cell { border: 1px solid #1e293b; box-sizing: border-box; }
+
+        .grey-macroblock {
+            position: absolute; width: 50px; height: 50px;
+            background: rgba(148, 163, 184, 0.4); z-index: 2; border: 1px solid #94a3b8;
+        }
+
+        .highlight-ref-55 {
+            position: absolute; top: 125px; left: 125px; width: 25px; height: 25px;
+            background: rgba(250, 204, 21, 0.8); border: 2px solid #ca8a04; z-index: 5; 
+            box-shadow: 0 0 10px rgba(250, 204, 21, 0.6); box-sizing: border-box;
+        }
+
+        .highlight-cur-66 {
+            position: absolute; top: 150px; left: 150px; width: 25px; height: 25px;
+            background: #eab308; border: 2px solid #ca8a04; z-index: 5; box-sizing: border-box;
+        }
+
+        .cuda-wrapper {
+            background: #f8fafc; padding: 20px; border-radius: 12px; border: 1px solid #cbd5e1;
+        }
+
+        .center-stage {
+            position: relative; width: 340px; height: 260px;
+            display: flex; justify-content: center; align-items: center;
+        }
+
+        .cuda-3d-cube {
+            perspective: 2500px; width: 100%; height: 100%;
+            display: flex; justify-content: center; align-items: center;
+            position: absolute;
+        }
+
+        .cube-inner {
+            position: relative; width: 128px; height: 128px;
+            transform-style: preserve-3d;
+            transform: rotateX(-20deg) rotateY(-35deg) translateZ(100px) translateX(-30px);
+        }
+
+        .cube-layer {
+            position: absolute; top: 0; left: 0;
+            display: grid; grid-template-columns: repeat(8, 16px); grid-template-rows: repeat(8, 16px);
+            transform-style: preserve-3d;
+        }
+
+        .thread-cell {
+            border: 1px solid rgba(100, 116, 139, 0.35); box-sizing: border-box; 
+            background: rgba(255, 255, 255, 0.2);
+        }
+
+        .smem-container {
+            width: 100%; display: flex; flex-direction: column; align-items: center; gap: 10px;
+        }
+
+        .smem-grid {
+            display: grid; grid-template-columns: repeat(16, 45px); gap: 4px;
+            background: #f8fafc; padding: 12px; border-radius: 8px; border: 1px solid #cbd5e1;
+        }
+
+        .smem-cell {
+            background: #ffffff; border: 2px solid #cbd5e1; border-radius: 6px;
+            height: 50px; display: flex; flex-direction: column; justify-content: center; 
+            align-items: center; position: relative; box-sizing: border-box; 
+            font-size: 10px; color: #64748b; overflow: hidden;
+        }
+
+        .smem-cell-index {
+            position: absolute; top: 3px; left: 4px; font-size: 9px; font-weight: 600;
+        }
+
+        .val-container {
+            position: relative; height: 15px; width: 100%; display: flex; justify-content: center;
+        }
+
+        .psad-text { 
+            position: absolute; font-size: 11px; font-weight: bold; color: #ca8a04; 
+            opacity: 0;
+        }
+        .sad-text { 
+            position: absolute; font-size: 11px; font-weight: bold; color: #166534; 
+            opacity: 0;
+        }
+
+        .explanation-box {
+            width: 100%; text-align: center; font-family: 'Outfit', sans-serif;
+            background: #f8fafc; padding: 15px; border-radius: 12px; border: 1px solid #cbd5e1;
+            font-size: 15px; color: #0f172a; line-height: 1.5;
+        }
+        .code-snippet { 
+            font-family: 'Fira Code', monospace; color: #4f46e5; font-size: 13px; 
+            background: #e0e7ff; padding: 2px 6px; border-radius: 4px; font-weight: 500;
+        }
+
+    </style>
+</head>
+<body>
+    <div class="presentation-window">
+        <div class="title-pill">Multiple Positions Loop: SMEM Reuse</div>
+
+        <div class="layout-container">
+            <div class="raw-grid-container">
+                <div class="frame-label">Reference Frame</div>
+                <div class="grid-frame">
+                    <div class="grey-macroblock" style="top: 0; left: 0;"></div>
+                    <div class="highlight-ref-55"></div>
+                    <script>for(let i=0; i<64; i++) document.write('<div class="cell"></div>');</script>
+                </div>
+            </div>
+
+            <div class="cuda-wrapper">
+                <div class="frame-label">CUDA Block (8x8x16)</div>
+                <div class="center-stage">
+                    <div class="cuda-3d-cube" id="cuda3dCube">
+                        <div class="cube-inner" id="cubeInner"></div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="raw-grid-container">
+                <div class="frame-label">Current Frame</div>
+                <div class="grid-frame">
+                    <div class="grey-macroblock" style="top: 150px; left: 150px;"></div>
+                    <div class="highlight-cur-66"></div>
+                    <script>for(let i=0; i<64; i++) document.write('<div class="cell"></div>');</script>
+                </div>
+            </div>
+        </div>
+
+        <div class="smem-container">
+            <div class="smem-grid" id="smemGrid"></div>
+            <div style="font-family: 'Outfit', sans-serif; font-size: 13px; color: #64748b; margin-top: 8px;" id="positionLabel">Position: 0 | Phase: Compute</div>
+        </div>
+
+        <div class="explanation-box">
+            <strong>Loop:</strong> <span class="code-snippet">for (int pos = tidx_2d; pos &lt; bounds.totalPositions; pos += threadsXY)</span><br>
+            <strong>Fase 1 (Compute):</strong> Thread Z [0-15] calcolano SAD parziale<br>
+            <strong>Fase 2 (Reduce):</strong> Riduzione parallela lungo Z<br>
+            <strong>Fase 3 (Result):</strong> SMEM riutilizzato per posizione successiva
+        </div>
+    </div>
+
+    <script>
+        const cubeInner = document.getElementById('cubeInner');
+        const smemGrid = document.getElementById('smemGrid');
+        const positionLabel = document.getElementById('positionLabel');
+        
+        const THREAD_Z = 16;
+        const targetIndex2D = 45; // [5,5]
+        const BASE_SMEM = targetIndex2D * THREAD_Z;
+        const NUM_POSITIONS = 4;
+        const CYCLE_DURATION = 24; // secondi
+
+        // Setup 3D Cube
+        for (let z = 0; z < THREAD_Z; z++) {
+            let cellsHTML = '';
+            for (let i = 0; i < 64; i++) cellsHTML += `<div class="thread-cell"></div>`;
+            cubeInner.innerHTML += `<div class="cube-layer" style="transform: translateZ(${-(z * 15)}px)">${cellsHTML}</div>`;
+        }
+
+        // Setup Shared Memory
+        for (let z = 0; z < THREAD_Z; z++) {
+            smemGrid.innerHTML += `
+                <div class="smem-cell" id="smem-${z}">
+                    <div class="smem-cell-index">${BASE_SMEM + z}</div>
+                    <div class="val-container" id="val-cont-${z}">
+                        <span class="psad-text" id="text-psad-${z}">P_SAD</span>
+                        <span class="sad-text" id="text-sad-${z}">SAD</span>
+                    </div>
+                </div>
+            `;
+        }
+        
+        // Generate CSS animations
+        let styleHTML = '<style>\n';
+        const positionDuration = CYCLE_DURATION / NUM_POSITIONS;  // 6 seconds per position
+
+        for (let pos = 0; pos < NUM_POSITIONS; pos++) {
+            const posStart = (pos * positionDuration) / CYCLE_DURATION * 100;
+            const posEnd = ((pos + 1) * positionDuration) / CYCLE_DURATION * 100;
+            
+            const phase1Start = posStart;
+            const phase1End = posStart + (posEnd - posStart) * 0.33;
+            const phase2Start = phase1End;
+            const phase2End = posStart + (posEnd - posStart) * 0.66;
+            const phase3Start = phase2End;
+            const phase3End = posStart + (posEnd - posStart) * 0.9;
+            const clearEnd = posEnd;
+
+            for (let z = 0; z < THREAD_Z; z++) {
+                // Stagger reduce phase by thread
+                const reduceStagger = z * (phase2End - phase2Start) / THREAD_Z;
+                const threadReduceStart = phase2Start + reduceStagger;
+                const threadReduceEnd = Math.min(threadReduceStart + 3, phase2End);
+
+                styleHTML += `
+                    @keyframes cell-${pos}-${z} {
+                        0%, ${phase1Start}% { background: #ffffff; border-color: #cbd5e1; }
+                        ${phase1Start}%, ${phase1End}% { background: rgba(250, 204, 21, 0.3); border-color: #eab308; }
+                        ${threadReduceStart}%, ${threadReduceEnd}% { background: rgba(250, 204, 21, 0.6); border-color: #facc15; box-shadow: 0 0 8px rgba(250, 204, 21, 0.5); }
+                        ${phase3Start}%, ${phase3End}% { background: rgba(34, 197, 94, 0.4); border-color: #22c55e; }
+                        ${clearEnd}%, 100% { background: #ffffff; border-color: #cbd5e1; box-shadow: none; }
+                    }
+
+                    @keyframes val-${pos}-${z} {
+                        0%, ${phase1Start}% { opacity: 0; transform: translateY(-15px); }
+                        ${phase1Start}%, ${phase3End}% { opacity: 1; transform: translateY(0); }
+                        ${clearEnd}%, 100% { opacity: 0; transform: translateY(15px); }
+                    }
+
+                    @keyframes psad-${pos}-${z} {
+                        0%, ${phase3Start - 1}% { opacity: 1; }
+                        ${phase3Start}%, 100% { opacity: 0; }
+                    }
+
+                    @keyframes sad-${pos}-${z} {
+                        0%, ${phase3Start - 1}% { opacity: 0; }
+                        ${phase3Start}%, ${phase3End}% { opacity: 1; }
+                        ${phase3End + 0.5}%, 100% { opacity: 0; }
+                    }
+                `;
+            }
+        }
+
+        // Apply animations to all cells
+        for (let z = 0; z < THREAD_Z; z++) {
+            styleHTML += `
+                #smem-${z} { animation: cell-0-${z} ${CYCLE_DURATION}s infinite; }
+                #val-cont-${z} { animation: val-0-${z} ${CYCLE_DURATION}s infinite; }
+                #text-psad-${z} { animation: psad-0-${z} ${CYCLE_DURATION}s infinite; }
+                #text-sad-${z} { animation: sad-0-${z} ${CYCLE_DURATION}s infinite; }
+            `;
+        }
+
+        styleHTML += '</style>';
+        document.head.insertAdjacentHTML('beforeend', styleHTML);
+
+        // Update label dynamically
+        setInterval(() => {
+            const elapsed = (Date.now() % (CYCLE_DURATION * 1000)) / 1000;
+            const currentPos = Math.floor((elapsed / positionDuration) % NUM_POSITIONS);
+            const timeInPos = elapsed - (currentPos * positionDuration);
+            const phase33 = positionDuration * 0.33;
+            const phase66 = positionDuration * 0.66;
+            
+            let phase = "Compute";
+            if (timeInPos > phase66) phase = "Result";
+            else if (timeInPos > phase33) phase = "Reduce";
+
+            positionLabel.textContent = `Position: ${currentPos} | Phase: ${phase} (${timeInPos.toFixed(1)}s)`;
+        }, 100);
+    </script>
+</body>
+</html>

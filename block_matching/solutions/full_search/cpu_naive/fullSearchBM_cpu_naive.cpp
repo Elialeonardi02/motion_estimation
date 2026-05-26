@@ -20,8 +20,8 @@ vector<vector<MotionVector>> fullSearchCPUNaiveGray(const ImageGray& curr, const
     LoggingUtils::printFrameInfo("CPU Naive", curr.width, curr.height, blockSize, blocksX, blocksY);
     LoggingUtils::printSearchModeInfo("CPU Naive", searchRange);
 
-    for(int by = 0; by < blocksY; by++) {
-        for(int bx = 0; bx < blocksX; bx++) {
+    for(int bx = 0; bx < blocksX; bx++) {
+        for(int by = 0; by < blocksY; by++) {
             // Top-left corner of current block: (x, y) = (bx * blockSize, by * blockSize)
             int x = bx * blockSize;
             int y = by * blockSize;
@@ -32,7 +32,7 @@ vector<vector<MotionVector>> fullSearchCPUNaiveGray(const ImageGray& curr, const
             
             for(int irefY = bounds.startY; irefY <= bounds.endY; irefY++) {
                 for(int irefX = bounds.startX; irefX <= bounds.endX; irefX++) {
-                    int refX = irefX * blockSize;
+                    int refX = irefX * blockSize; // refX and refY are the top-left corner of the candidate block in the reference frame
                     int refY = irefY * blockSize;
                     int dx = irefX - bx;
                     int dy = irefY - by;
@@ -45,13 +45,13 @@ vector<vector<MotionVector>> fullSearchCPUNaiveGray(const ImageGray& curr, const
                     }
                 }
             }
-            mv[by][bx] = bestMV;
+            mv[bx][by] = bestMV;
         }
-        // Progress every 10 rows
-        if((by + 1) % 10 == 0 || by == blocksY - 1) {
+        // Progress every 10 columns
+        if((bx + 1) % 10 == 0 || bx == blocksX - 1) {
             auto current_time = chrono::high_resolution_clock::now();
             chrono::duration<double> elapsed = current_time - start_time;
-            int processed = (by + 1) * blocksX;
+            int processed = (bx + 1) * blocksY;
             int total = blocksX * blocksY;
             LoggingUtils::printProgressUpdate("CPU Naive", processed, total, elapsed.count());
         }
@@ -74,8 +74,8 @@ vector<vector<MotionVector>> fullSearchCPUNaiveRGB(const ImageColor& curr, const
     LoggingUtils::printFrameInfo("CPU Naive RGB", curr.width, curr.height, blockSize, blocksX, blocksY);
     LoggingUtils::printSearchModeInfo("CPU Naive RGB", searchRange);
 
-    for(int by = 0; by < blocksY; by++) {
-        for(int bx = 0; bx < blocksX; bx++) {
+    for(int bx = 0; bx < blocksX; bx++) {
+        for(int by = 0; by < blocksY; by++) {
             // Top-left corner of current block: (x, y) = (bx * blockSize, by * blockSize)
             int x = bx * blockSize;
             int y = by * blockSize;
@@ -101,13 +101,13 @@ vector<vector<MotionVector>> fullSearchCPUNaiveRGB(const ImageColor& curr, const
                     }
                 }
             }
-            mv[by][bx] = bestMV;
+            mv[bx][by] = bestMV;
         }
-        // Progress every 10 rows
-        if((by + 1) % 10 == 0 || by == blocksY - 1) {
+        // Progress every 10 columns
+        if((bx + 1) % 10 == 0 || bx == blocksX - 1) {
             auto current_time = chrono::high_resolution_clock::now();
             chrono::duration<double> elapsed = current_time - start_time;
-            int processed = (by + 1) * blocksX;
+            int processed = (bx + 1) * blocksY;
             int total = blocksX * blocksY;
             LoggingUtils::printProgressUpdate("CPU Naive RGB", processed, total, elapsed.count());
         }

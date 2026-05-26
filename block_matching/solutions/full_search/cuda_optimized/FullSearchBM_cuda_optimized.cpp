@@ -57,7 +57,7 @@ __global__ void computeSADKernel(const unsigned char*  d_curr,const unsigned cha
         s_ref[i] = __ldg(&d_ref[(ref_y + py) * width + (ref_x + px)]);  // load reference block pixel (_ldg read-only cache optimization)
     }
 
-    __syncthreads();1.	
+    __syncthreads();
 
 
     // partial sad computation for each thread
