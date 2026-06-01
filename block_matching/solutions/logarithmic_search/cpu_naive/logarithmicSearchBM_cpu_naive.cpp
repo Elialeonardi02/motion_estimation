@@ -18,8 +18,8 @@ vector<vector<MotionVector>> logarithmicSearchCPUNaiveGray(const ImageGray& curr
 
     auto start_time = chrono::high_resolution_clock::now();
     
-    LoggingUtils::printFrameInfo("CPU Naive (Logarithmic)", curr.width, curr.height, blockSize, blocksX, blocksY);
-    cout << "CPU Naive (Logarithmic Search): Search strategy: Logarithmic search (distance="
+    LoggingUtils::printFrameInfo("CPU Naive Logarithmic", curr.width, curr.height, blockSize, blocksX, blocksY);
+    cout << "CPU Naive Logarithmic (Grayscale): Search strategy: Logarithmic search (distance="
         << distance << " blocks)" << endl;
 
     for(int bx = 0; bx < blocksX; bx++) {
@@ -74,13 +74,13 @@ vector<vector<MotionVector>> logarithmicSearchCPUNaiveGray(const ImageGray& curr
             chrono::duration<double> elapsed = current_time - start_time;
             int processed = (bx + 1) * blocksY;
             int total = blocksX * blocksY;
-            LoggingUtils::printProgressUpdate("CPU Naive (Logarithmic)", processed, total, elapsed.count());
+            LoggingUtils::printProgressUpdate("CPU Naive Logarithmic", processed, total, elapsed.count());
         }
     }
     
     auto end_time = chrono::high_resolution_clock::now();
     chrono::duration<double> total_time = end_time - start_time;
-    LoggingUtils::printTimingReport("CPU Naive (Logarithmic)", total_time.count());
+    LoggingUtils::printTimingReport("CPU Naive Logarithmic", total_time.count());
     
     return mv;
 }

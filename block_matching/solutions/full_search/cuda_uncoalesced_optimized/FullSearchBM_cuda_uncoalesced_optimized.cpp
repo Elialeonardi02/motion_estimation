@@ -58,8 +58,8 @@ __global__ void fullSearchKernel(const unsigned char* d_curr, const unsigned cha
     int best_dx = 0, best_dy = 0;
     
     // Shared memory layout: current block + SAD partial + reduction buffers
-    extern __shared__ unsigned char shared_memory[];
-    unsigned char* s_curr = shared_memory;
+    extern __shared__ unsigned char smem[];
+    unsigned char* s_curr = smem;
     int threadsXY = blockDim.x * blockDim.y;
     
     int* shared_block_thread_sad_partial = (int*)(s_curr + blockSize * blockSize); // buffer for partial SAD results from each thread (size = threadsPerBlock)
@@ -71,10 +71,10 @@ __global__ void fullSearchKernel(const unsigned char* d_curr, const unsigned cha
     }
     
     // Initialize shared memory for reduction buffers (z=0 threads only)
+    // idle threads will not write to shared memory, but they will participate in reduction
     if (threadIdx.z == 0) {
         shared_block_thread_results[tidx_2d] = {INT_MAX, 0, 0};
     }
-
     __syncthreads();
     
     // Precalculate pixels-per-thread for SAD parallelization
@@ -83,31 +83,33 @@ __global__ void fullSearchKernel(const unsigned char* d_curr, const unsigned cha
     // Each thread (X,Y,Z) searches positions and computes partial SAD along Z
     // threadsXY < totalPosition, threadsZ handles partial SAD for its assigned positions (i, i+threadsXY, i+2*threadsXY, ...), then reduction along Z gives total SAD for that position
     // threadsXY = totalPosition, threads along Z dimension compute partial SAD for only one assigned position.
-    for (int pos = tidx_2d; pos < bounds.totalPositions; pos += threadsXY) {
+    const int totalIterations = (bounds.totalPositions + threadsXY - 1) / threadsXY;
+    for (int iter = 0; iter < totalIterations; iter++) {
+        const int pos = iter * threadsXY + tidx_2d;
+        const bool validPos = (pos < bounds.totalPositions);
         // Convert position to 2D coordinates within search window
-        int ref_bx = bounds.startX + (pos % bounds.width);
-        int ref_by = bounds.startY + (pos / bounds.width);
-
-        shared_block_thread_sad_partial[tidx_3d] = computeSAD_device_partial(
+        int ref_bx = validPos ? bounds.startX + (pos % bounds.width) : 0; // for invalid position, set to 0 
+        int ref_by = validPos ? bounds.startY + (pos / bounds.width) : 0; // for invalid position, set to 0
+        shared_block_thread_sad_partial[tidx_3d] = validPos ? computeSAD_device_partial(
             s_curr, d_ref, ref_bx * blockSize, ref_by * blockSize, blockSize, width,
-            threadIdx.z * pixelsPerThread, pixelsPerThread);
-
+            threadIdx.z * pixelsPerThread, pixelsPerThread) : 0;
+        
         __syncthreads();
         
-        // Reduce along Z
-        for (int stride = 1; stride < blockDim.z; stride *= 2) {
-            if (threadIdx.z + stride < blockDim.z) {
+        // Reduce along Z, descending stride
+        for (int stride = blockDim.z >> 1; stride > 0; stride >>= 1) {
+            if (threadIdx.z < stride) {
                 // Add SAD from neighbor thread in Z dimension
                 shared_block_thread_sad_partial[tidx_3d] += shared_block_thread_sad_partial[tidx_3d + stride * threadsXY];
             }
             __syncthreads();
         }
         
-        // Thread z=0 has complete SAD for this position
-        if (threadIdx.z == 0) {
+        // Thread z=0 has complete SAD for this position, compute best match with tie-breaking by distance
+        if (threadIdx.z == 0 && validPos) {
             int sad = shared_block_thread_sad_partial[tidx_3d];
-            int ref_dx = ref_bx - (int)blockIdx.x;
-            int ref_dy = ref_by - (int)blockIdx.y;
+            int ref_dx = ref_bx - blockIdx.x;
+            int ref_dy = ref_by - blockIdx.y;
             int dist = ref_dx * ref_dx + ref_dy * ref_dy;  // Distance in blocks for tie-breaking
             int best_dist = best_dx * best_dx + best_dy * best_dy;
             if (sad < best_sad || (sad == best_sad && dist < best_dist)) {
@@ -125,8 +127,9 @@ __global__ void fullSearchKernel(const unsigned char* d_curr, const unsigned cha
     
     __syncthreads();
 
-    // Find global best among all z=0 threads in this block (thread 0 only)
-    if (threadIdx.z == 0 && tidx_2d == 0) {
+    // Find global best among all z=0 threads in this block (thread 0,0,0 only)
+    // FIXME this reduction can be optimized using stride-base reduction
+    if (tidx_3d == 0) {
         int global_best_sad = INT_MAX;
         int global_best_dx = 0, global_best_dy = 0;
         int global_best_dist = INT_MAX;
@@ -153,6 +156,10 @@ __global__ void fullSearchKernel(const unsigned char* d_curr, const unsigned cha
 
  vector<vector<MotionVector>> fullSearchCUDAUncoalescedOptimizedGray(const ImageGray& curr, const ImageGray& ref,
                                                                     int blockSize, int searchRange) {
+    // Create CUDA
+    CudaTimer timer("Total timer");
+    timer.start();
+
     cudaSetDevice(0);
     
     ValidationUtils::validateFrameDimensions(curr, ref);
@@ -170,7 +177,7 @@ __global__ void fullSearchKernel(const unsigned char* d_curr, const unsigned cha
     unsigned char* d_ref = nullptr;
     size_t bytesPerFrame = 0;
     GPUMemoryUtils::allocateFrames(curr, ref, d_curr, d_ref, bytesPerFrame);
-    
+
     LoggingUtils::printCopyingToGPU("CUDA Uncoalesced Optimized");
     GPUMemoryUtils::copyFramesToGPU(d_curr, d_ref, curr, ref, bytesPerFrame);
     
@@ -189,9 +196,11 @@ __global__ void fullSearchKernel(const unsigned char* d_curr, const unsigned cha
     }
 
     if (threadsPerBlockX * threadsPerBlockY <= maxThreadsPerBlock) {
-        threadsPerBlockZ = min(64, maxThreadsPerBlock / (threadsPerBlockX * threadsPerBlockY));
+        int z = min(64, maxThreadsPerBlock / (threadsPerBlockX * threadsPerBlockY));
+        // blockDim.z must be a power of 2 to ensure stride reduction covers all Z levels without skipping partial SAD contributions
+        threadsPerBlockZ = 1; 
+        while (threadsPerBlockZ * 2 <= z) threadsPerBlockZ *= 2;
     } else {
-        // FIXME review dimensions for large blocks to bnetter optimization
         threadsPerBlockX = 16;
         threadsPerBlockY = 16;
         threadsPerBlockZ = 4;
@@ -209,11 +218,12 @@ __global__ void fullSearchKernel(const unsigned char* d_curr, const unsigned cha
     cout << "CUDA Uncoalesced Optimized (Grayscale): Launching kernel with " << blockDim.x << "x" << blockDim.y << "x" << blockDim.z
         << " threads per block (" << threadsPerBlock << " total threads)..." << endl;
     
-    // Create CUDA timer
-    CudaTimer timer("Kernel execution");
-    timer.start();
+    // Create kernel timer
+    CudaTimer kernelTimer("Kernel execution");
+    kernelTimer.start();
     
     // Allocate shared memory
+    // FIXME SMEM size can be reduced reusing partial SAD buffer for redution of total array.
     size_t sharedMemSize = blockSize * blockSize * sizeof(unsigned char) +
                            threadsPerBlock * sizeof(int) +
                            (blockDim.x * blockDim.y) * sizeof(ThreadResult);
@@ -225,9 +235,9 @@ __global__ void fullSearchKernel(const unsigned char* d_curr, const unsigned cha
     cout << "CUDA Uncoalesced Optimized (Grayscale): Kernel launched, synchronizing..." << endl;
     gpuErrorCheck(cudaDeviceSynchronize());
     
-    float milliseconds = timer.stop();
+    float kernelMilliseconds = kernelTimer.stop();
     cout << "CUDA Uncoalesced Optimized (Grayscale): Timing:" << endl;
-    CudaTimingUtils::printKernelTiming("Kernel execution", milliseconds);
+    CudaTimingUtils::printKernelTiming("CUDA Uncoalesced Optimized (Grayscale): Kernel timing:", kernelMilliseconds);
     
     // Copy results back to host
     vector<MotionVector> h_mv(blocksX * blocksY);
@@ -239,6 +249,10 @@ __global__ void fullSearchKernel(const unsigned char* d_curr, const unsigned cha
     // Cleanup
     LoggingUtils::printCleanupGPU("CUDA Uncoalesced Optimized");
     GPUMemoryUtils::freeMemory(d_curr, d_ref, d_mv);
+
+    // Stop total timer after cleanup
+    float milliseconds = timer.stop();
+    CudaTimingUtils::printKernelTiming("CUDA Uncoalesced Optimized (Grayscale): Total timing:", milliseconds);
     
     LoggingUtils::printProcessingComplete("CUDA Uncoalesced Optimized");
     return result;

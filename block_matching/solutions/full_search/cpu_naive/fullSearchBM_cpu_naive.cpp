@@ -1,6 +1,7 @@
 #include "fullSearchBM_cpu_naive.h"
 #include "sad_utils.h"
 #include "utils.h"
+#include "types.h"
 #include <cmath>
 #include <limits>
 #include <iostream>

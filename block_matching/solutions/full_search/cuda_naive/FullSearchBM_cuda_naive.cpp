@@ -47,30 +47,28 @@ __global__ void fullSearchKernel(const unsigned char* d_curr, const unsigned cha
     // Thread-local best match
     int best_sad = INT_MAX;
     int best_dx = 0, best_dy = 0;
-    int ref_y;
-    int ref_x;
      // total_threads < totalPosition, thread processes its assigned positions (i, i+total_threads, i+2*total_threads, ...)
     // total_threads = totalPosition, thread processes only one assigned position.
     for (int pos = tidx; pos < bounds.totalPositions; pos += total_threads) {
         // Convert position to 2D coordinates within search window
         int ref_bx = bounds.startX + (pos % bounds.width);
         int ref_by = bounds.startY + (pos / bounds.width);
-        ref_x = ref_bx * blockSize;
-        ref_y = ref_by * blockSize;
+        int ref_x = ref_bx * blockSize;
+        int ref_y = ref_by * blockSize;
         
         int sad = computeSAD_device(d_curr, d_ref, x, y, ref_x, ref_y, blockSize, width);
         int dist = (ref_x - x) * (ref_x - x) + (ref_y - y) * (ref_y - y);
         int best_dist = best_dx * best_dx + best_dy * best_dy; // local best distance for tie-breaking
         if (sad < best_sad || (sad == best_sad && dist < best_dist)) { // update local best match
             best_sad = sad;
-            best_dx = (ref_x - x) / blockSize; // local best dx
-            best_dy = (ref_y - y) / blockSize; // local best dy
+            best_dx = (ref_x - x) ; // local best dx
+            best_dy = (ref_y - y); // local best dy
         }
     }
     
     // Write thread result to global memory
     int result_idx = (blockIdx.x + blockIdx.y * gridDim.x ) * threadsPerBlock + tidx;
-    d_thread_results[result_idx] = {best_sad, best_dx, best_dy};
+    d_thread_results[result_idx] = {best_sad, best_dx/blockSize, best_dy/blockSize}; // store block-level motion vector (dx, dy) by converting from pixel-level to block-level displacement
     
     __syncthreads();
     
@@ -97,6 +95,10 @@ __global__ void fullSearchKernel(const unsigned char* d_curr, const unsigned cha
 
 vector<vector<MotionVector>> fullSearchCUDANaiveGray(const ImageGray& curr, const ImageGray& ref, 
                                                      int blockSize, int searchRange) {
+    // Create CUDA timer
+    CudaTimer timer("Total timer");
+    timer.start();
+
     cudaSetDevice(0);
     
     ValidationUtils::validateFrameDimensions(curr, ref);
@@ -109,7 +111,10 @@ vector<vector<MotionVector>> fullSearchCUDANaiveGray(const ImageGray& curr, cons
     LoggingUtils::printFrameInfo("CUDA Naive", curr.width, curr.height, blockSize, blocksX, blocksY);
     LoggingUtils::printSearchModeInfo("CUDA Naive", searchRange);
     
-    // Determine threads per block (max 1024 threads per block on typical GPUs)
+    // Determine threads per block
+    cudaDeviceProp prop;
+    cudaGetDeviceProperties(&prop, 0);
+    int maxThreadsPerBlock = prop.maxThreadsPerBlock;
     int threadsPerBlockX = blocksX;
     int threadsPerBlockY = blocksY;
     if (searchRange > 0) {
@@ -119,10 +124,10 @@ vector<vector<MotionVector>> fullSearchCUDANaiveGray(const ImageGray& curr, cons
         threadsPerBlockY = min(threadsPerBlockY, searchRange * 2 + 1); 
     }
     int threadsPerBlock = threadsPerBlockX * threadsPerBlockY;
-    if (threadsPerBlock > 1024) {
-        threadsPerBlockX = 32;
-        threadsPerBlockY = 32;
-        threadsPerBlock = 1024;
+    if (threadsPerBlock > maxThreadsPerBlock) {
+        threadsPerBlockX = sqrt(maxThreadsPerBlock);
+        threadsPerBlockY = threadsPerBlockX;
+        threadsPerBlock = maxThreadsPerBlock;
     }
     
     // Allocate GPU memory for frames
@@ -150,9 +155,9 @@ vector<vector<MotionVector>> fullSearchCUDANaiveGray(const ImageGray& curr, cons
     cout << "CUDA Naive (Grayscale): Launching kernel with " << blockDim.x << "x" << blockDim.y 
         << " threads per block (" << (blockDim.x * blockDim.y) << " total threads)..." << endl;
     
-    // Create CUDA timer
-    CudaTimer timer("Kernel execution");
-    timer.start();
+    // Create kernel timer
+    CudaTimer kernelTimer("Kernel execution");
+    kernelTimer.start();
     
     fullSearchKernel<<<gridDim, blockDim>>>(d_curr, d_ref, d_mv, blockSize,
                                             curr.width, d_thread_results, 
@@ -162,9 +167,8 @@ vector<vector<MotionVector>> fullSearchCUDANaiveGray(const ImageGray& curr, cons
     cout << "CUDA Naive (Grayscale): Kernel launched, synchronizing..." << endl;
     gpuErrorCheck(cudaDeviceSynchronize());
     
-    float milliseconds = timer.stop();
-    cout << "CUDA Naive (Grayscale): Timing:" << endl;
-    CudaTimingUtils::printKernelTiming("Kernel execution", milliseconds);
+    float kernelMilliseconds = kernelTimer.stop();;
+    CudaTimingUtils::printKernelTiming("CUDA Naive (Grayscale): Kernel timer:", kernelMilliseconds);
     
     // Copy results back to host
     vector<MotionVector> h_mv(blocksX * blocksY);
@@ -177,6 +181,10 @@ vector<vector<MotionVector>> fullSearchCUDANaiveGray(const ImageGray& curr, cons
     LoggingUtils::printCleanupGPU("CUDA Naive");
     GPUMemoryUtils::freeMemory(d_curr, d_ref, d_mv);
     cudaFree(d_thread_results);
+
+    // Stop total timer after cleanup
+    float milliseconds = timer.stop();
+    CudaTimingUtils::printKernelTiming("CUDA Naive (Grayscale): total timing:", milliseconds);
     
     LoggingUtils::printProcessingComplete("CUDA Naive");
     return result;
