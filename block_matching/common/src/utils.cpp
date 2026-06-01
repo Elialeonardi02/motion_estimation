@@ -194,7 +194,7 @@ void calculateGridDimensions(int width, int height, int blockSize,
 }
 
 vector<vector<MotionVector>> createMotionVectorGrid(int width, int height) {
-  return vector<vector<MotionVector>>(height, vector<MotionVector>(width));
+  return vector<vector<MotionVector>>(width, vector<MotionVector>(height));
 }
 
 vector<vector<MotionVector>> flatTo2DVector(
@@ -203,7 +203,7 @@ vector<vector<MotionVector>> flatTo2DVector(
   
   for (int by = 0; by < blocksY; ++by) {
     for (int bx = 0; bx < blocksX; ++bx) {
-      result[by][bx] = h_mv_flat[by * blocksX + bx];
+      result[bx][by] = h_mv_flat[by * blocksX + bx];
     }
   }
   

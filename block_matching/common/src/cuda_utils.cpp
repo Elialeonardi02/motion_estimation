@@ -9,7 +9,7 @@ void allocateFrames(const ImageGray& curr, const ImageGray& ref,
                    unsigned char*& d_curr, unsigned char*& d_ref,
                    size_t& bytesPerFrame) {
   int currSize = curr.width * curr.height;
-  int refSize = ref.width * curr.height;
+  int refSize = ref.width * ref.height;
   
   bytesPerFrame = currSize * sizeof(unsigned char);
   
@@ -43,6 +43,14 @@ void freeMemory(unsigned char* d_curr, unsigned char* d_ref,
   if (d_curr) cudaFree(d_curr);
   if (d_ref) cudaFree(d_ref);
   if (d_sad) cudaFree(d_sad);
+  if (d_mv) cudaFree(d_mv);
+}
+
+void freeMemory(unsigned char* d_curr, unsigned char* d_ref,
+               void* d_extra, MotionVector* d_mv) {
+  if (d_curr) cudaFree(d_curr);
+  if (d_ref) cudaFree(d_ref);
+  if (d_extra) cudaFree(d_extra);
   if (d_mv) cudaFree(d_mv);
 }
 
