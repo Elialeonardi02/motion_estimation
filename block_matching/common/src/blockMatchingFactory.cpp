@@ -7,22 +7,22 @@
 
 // Forward declarations for CPU implementations
 std::vector<std::vector<MotionVector>> fullSearchCPUNaiveGray(const ImageGray& curr, const ImageGray& ref,
-                                                               int blockSize, int searchRange);
+                                                               int blockSize, int searchRange, SingleRunMetrics& metrics);
 std::vector<std::vector<MotionVector>> fullSearchCPUNaiveRGB(const ImageColor& curr, const ImageColor& ref,
                                                               int blockSize, int searchRange);
 
 std::vector<std::vector<MotionVector>> logarithmicSearchCPUNaiveGray(const ImageGray& curr, const ImageGray& ref,
-                                                                      int blockSize, int distance);
+                                                                      int blockSize, int distance, SingleRunMetrics& metrics);
 
 #ifndef NO_CUDA
 extern std::vector<std::vector<MotionVector>> fullSearchCUDANaiveGray(
-    const ImageGray& curr, const ImageGray& ref, int blockSize, int searchRange);
+    const ImageGray& curr, const ImageGray& ref, int blockSize, int searchRange, SingleRunMetrics& metrics);
 
 extern std::vector<std::vector<MotionVector>> fullSearchCUDAOptimizedGray(
-    const ImageGray& curr, const ImageGray& ref, int blockSize, int searchRange);
+    const ImageGray& curr, const ImageGray& ref, int blockSize, int searchRange, SingleRunMetrics& metrics);
 
 extern std::vector<std::vector<MotionVector>> fullSearchCUDAUncoalescedOptimizedGray(
-    const ImageGray& curr, const ImageGray& ref, int blockSize, int searchRange);
+    const ImageGray& curr, const ImageGray& ref, int blockSize, int searchRange, SingleRunMetrics& metrics);
 #endif
 
 // BASE CLASSES
@@ -46,8 +46,8 @@ public:
 class FullSearchBlockMatcherCPUNaive : public FullSearchBlockMatcherBase {
 public:
     std::vector<std::vector<MotionVector>> matchGray(
-        const ImageGray& curr, const ImageGray& ref, int blockSize) override {
-        return fullSearchCPUNaiveGray(curr, ref, blockSize, searchRange);
+        const ImageGray& curr, const ImageGray& ref, int blockSize, SingleRunMetrics& metrics) override {
+        return fullSearchCPUNaiveGray(curr, ref, blockSize, searchRange, metrics);
     }
     
     std::vector<std::vector<MotionVector>> matchRGB(
@@ -62,24 +62,24 @@ public:
 class FullSearchBlockMatcherCUDANaive : public FullSearchBlockMatcherBase {
 public:
     std::vector<std::vector<MotionVector>> matchGray(
-        const ImageGray& curr, const ImageGray& ref, int blockSize) override {
-        return fullSearchCUDANaiveGray(curr, ref, blockSize, searchRange);
+        const ImageGray& curr, const ImageGray& ref, int blockSize, SingleRunMetrics& metrics) override {
+        return fullSearchCUDANaiveGray(curr, ref, blockSize, searchRange, metrics);
     }
 };
 
 class FullSearchBlockMatcherCUDAOptimized : public FullSearchBlockMatcherBase {
 public:
     std::vector<std::vector<MotionVector>> matchGray(
-        const ImageGray& curr, const ImageGray& ref, int blockSize) override {
-        return fullSearchCUDAOptimizedGray(curr, ref, blockSize, searchRange);
+        const ImageGray& curr, const ImageGray& ref, int blockSize, SingleRunMetrics& metrics) override {
+        return fullSearchCUDAOptimizedGray(curr, ref, blockSize, searchRange, metrics);
     }
 };
 
 class FullSearchBlockMatcherCUDAUncoalescedOptimized : public FullSearchBlockMatcherBase {
 public:
     std::vector<std::vector<MotionVector>> matchGray(
-        const ImageGray& curr, const ImageGray& ref, int blockSize) override {
-        return fullSearchCUDAUncoalescedOptimizedGray(curr, ref, blockSize, searchRange);
+        const ImageGray& curr, const ImageGray& ref, int blockSize, SingleRunMetrics& metrics) override {
+        return fullSearchCUDAUncoalescedOptimizedGray(curr, ref, blockSize, searchRange, metrics);
     }
 };
 
@@ -89,7 +89,7 @@ public:
 class FullSearchBlockMatcherCUDANaive : public FullSearchBlockMatcherBase {
 public:
     std::vector<std::vector<MotionVector>> matchGray(
-        const ImageGray&, const ImageGray&, int) override {
+        const ImageGray&, const ImageGray&, int, SingleRunMetrics&) override {
         throw std::runtime_error("CUDA support is not available. Compile with CUDA support enabled.");
     }
 };
@@ -97,7 +97,7 @@ public:
 class FullSearchBlockMatcherCUDAOptimized : public FullSearchBlockMatcherBase {
 public:
     std::vector<std::vector<MotionVector>> matchGray(
-        const ImageGray&, const ImageGray&, int) override {
+        const ImageGray&, const ImageGray&, int, SingleRunMetrics&) override {
         throw std::runtime_error("CUDA support is not available. Compile with CUDA support enabled.");
     }
 };
@@ -105,7 +105,7 @@ public:
 class FullSearchBlockMatcherCUDAUncoalescedOptimized : public FullSearchBlockMatcherBase {
 public:
     std::vector<std::vector<MotionVector>> matchGray(
-        const ImageGray&, const ImageGray&, int) override {
+        const ImageGray&, const ImageGray&, int, SingleRunMetrics&) override {
         throw std::runtime_error("CUDA support is not available. Compile with CUDA support enabled.");
     }
 };
@@ -119,8 +119,8 @@ private:
     
 public:
     std::vector<std::vector<MotionVector>> matchGray(
-        const ImageGray& curr, const ImageGray& ref, int blockSize) override {
-        return logarithmicSearchCPUNaiveGray(curr, ref, blockSize, distance);
+        const ImageGray& curr, const ImageGray& ref, int blockSize, SingleRunMetrics& metrics) override {
+        return logarithmicSearchCPUNaiveGray(curr, ref, blockSize, distance, metrics);
     }
     
     std::vector<std::vector<MotionVector>> matchRGB(

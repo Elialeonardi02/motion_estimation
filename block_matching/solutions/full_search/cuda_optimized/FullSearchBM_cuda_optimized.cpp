@@ -8,6 +8,7 @@
 #include "cuda_utils.h"
 #include "sad_utils.h"
 #include "utils.h"
+#include <chrono>
 
 using namespace std;
 
@@ -199,11 +200,15 @@ __global__ void findBestMVKernel(const int* d_sad, MotionVector* d_mv, int maxCa
 
 // HOST CODE
 vector<vector<MotionVector>> fullSearchCUDAOptimizedGray(const ImageGray& curr, const ImageGray& ref, 
-                                                         int blockSize, int searchRange) {
+                                                         int blockSize, int searchRange, SingleRunMetrics& metrics) {
+    auto total_time_start = std::chrono::high_resolution_clock::now();
+    
     // CUDA timing events
-    cudaEvent_t evTotalStart, evTotalStop;
-    createCudaEvent(evTotalStart);
-    createCudaEvent(evTotalStop);
+    cudaEvent_t evKSADStart, evKSADStop, evKBestMVStart, evKBestMVStop;
+    createCudaEvent(evKSADStart);
+    createCudaEvent(evKSADStop);
+    createCudaEvent(evKBestMVStart);
+    createCudaEvent(evKBestMVStop);
 
     cudaSetDevice(0);
     
@@ -314,15 +319,6 @@ vector<vector<MotionVector>> fullSearchCUDAOptimizedGray(const ImageGray& curr, 
                << " and block "<< threadsXBestMV << "x" << threadsYBestMV
                << " (K1=" << smKSad/1024.0 << "KB, K2=" << smKBestMV/1024.0 << "KB)\n\n";
     cout << "CUDA Optimized (Grayscale): d_sad = " << sadBytes / (1024.0 * 1024.0) << " MB\n";
-    
-    // CUDA timing events for individual kernels
-    cudaEvent_t evKSadStart, evKSadStop;
-    cudaEvent_t evKBestMVStart, evKBestMVStop;
-
-    createCudaEvent(evKSadStart); createCudaEvent(evKSadStop);
-    createCudaEvent(evKBestMVStart); createCudaEvent(evKBestMVStop);
-
-    recordCudaEvent(evTotalStart);
 
     LoggingUtils::printCopyingToGPU("CUDA Optimized");
     //GPUMemoryUtils::copyFramesToGPU(d_curr, d_ref, curr, ref, bytesPerFrame);
@@ -337,7 +333,7 @@ vector<vector<MotionVector>> fullSearchCUDAOptimizedGray(const ImageGray& curr, 
     const dim3 blockDimKSad(threadsKSad, 1, 1);
     const dim3 blockDimBestMV(threadsXBestMV, threadsYBestMV, 1);
 
-    recordCudaEvent(evKSadStart);
+    recordCudaEvent(evKSADStart);
 
         cout << "CUDA Optimized (Grayscale): Launching computeSADKernel with "
             << blockDimKSad.x << "x" << blockDimKSad.y << "x" << blockDimKSad.z
@@ -346,8 +342,8 @@ vector<vector<MotionVector>> fullSearchCUDAOptimizedGray(const ImageGray& curr, 
         computeSADKernel<<<gridKSad, blockDimKSad, smKSad>>>(d_curr, d_ref, d_sad,
                                                   blockSize, frame_pitch_bytes, searchRange);
     gpuErrorCheck(cudaGetLastError());
-    recordCudaEvent(evKSadStop);
-
+    recordCudaEvent(evKSADStop);
+    // gpuErrorCheck(cudaDeviceSynchronize()); // no need to synchronize, with default stream, kernel launches are serialized.
     recordCudaEvent(evKBestMVStart);
 
         
@@ -357,21 +353,19 @@ vector<vector<MotionVector>> fullSearchCUDAOptimizedGray(const ImageGray& curr, 
 
         findBestMVKernel<<<gridKBestMV, blockDimBestMV, smKBestMV>>>(d_sad, d_mv, maxCandidates, searchRange, reductionBase);
     gpuErrorCheck(cudaGetLastError());
+    
     recordCudaEvent(evKBestMVStop);
 
     cout << "CUDA Optimized (Grayscale): Kernel launched, synchronizing..." << endl;
     gpuErrorCheck(cudaDeviceSynchronize());
 
     // Timing report for individual kernels
-    const float msKSad = elapsedCudaTime(evKSadStart, evKSadStop);
+    const float msKSAD = elapsedCudaTime(evKSADStart, evKSADStop);
     const float msKBestMV = elapsedCudaTime(evKBestMVStart, evKBestMVStop);
 
     cout << "CUDA Optimized (Grayscale): Timing (Kernels only):" << endl;
-    CudaTimingUtils::printKernelTiming("computeSADKernel", msKSad);
+    CudaTimingUtils::printKernelTiming("computeSADKernel", msKSAD);
     CudaTimingUtils::printKernelTiming("findBestMVKernel", msKBestMV);
-
-    destroyCudaEvent(evKSadStart); destroyCudaEvent(evKSadStop);
-    destroyCudaEvent(evKBestMVStart); destroyCudaEvent(evKBestMVStop);
 
     // Copy results back to host
     vector<MotionVector> h_mv_flat(blocksX * blocksY);
@@ -384,18 +378,16 @@ vector<vector<MotionVector>> fullSearchCUDAOptimizedGray(const ImageGray& curr, 
     LoggingUtils::printCleanupGPU("CUDA Optimized");
     GPUMemoryUtils::freeMemory(d_curr, d_ref, d_sad, d_mv);
 
-    // Record total 
-    recordCudaEvent(evTotalStop);
+    // Stop total timer after cleanup
+    auto total_time_stop = std::chrono::high_resolution_clock::now();
+    float total_time = std::chrono::duration<float, std::milli>(total_time_stop - total_time_start).count();
+    metrics.total_ms = total_time;
+    metrics.gpu_kernel1_ms = msKSAD;
+    metrics.gpu_kernel2_ms = msKBestMV;
 
-    // Timing report for total
-    const float msTotal = elapsedCudaTime(evTotalStart, evTotalStop);
-
-    CudaTimingUtils::printKernelTiming("CUDA Optimized (Grayscale): Timing total ", msTotal);
-
-    destroyCudaEvent(evTotalStart); destroyCudaEvent(evTotalStop);
+    destroyCudaEvent(evKSADStart); destroyCudaEvent(evKSADStop);
+    destroyCudaEvent(evKBestMVStart); destroyCudaEvent(evKBestMVStop);
 
     LoggingUtils::printProcessingComplete("CUDA Optimized");
     return result;
 }
-
-

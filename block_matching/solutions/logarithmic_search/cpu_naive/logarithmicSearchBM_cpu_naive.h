@@ -6,7 +6,7 @@
 
 // Logarithmic Search Block Matching for grayscale images
 std::vector<std::vector<MotionVector>> logarithmicSearchCPUNaiveGray(const ImageGray& curr, const ImageGray& ref,
-                                                               int blockSize, int distance);
+                                                               int blockSize, int distance, SingleRunMetrics& metrics);
 
 
 #endif // LOGARITHMICSEARCH_CPU_NAIVE_H

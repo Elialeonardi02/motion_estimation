@@ -8,6 +8,7 @@
 #include "utils.h"
 #include "cuda_utils.h"
 #include "sad_utils.h"
+#include <chrono>
 
 using namespace std;
 
@@ -94,10 +95,15 @@ __global__ void fullSearchKernel(const unsigned char* d_curr, const unsigned cha
 
 
 vector<vector<MotionVector>> fullSearchCUDANaiveGray(const ImageGray& curr, const ImageGray& ref, 
-                                                     int blockSize, int searchRange) {
-    // Create CUDA timer
-    CudaTimer timer("Total timer");
-    timer.start();
+                                                     int blockSize, int searchRange, SingleRunMetrics& metrics) {
+    
+    auto total_time_start = std::chrono::high_resolution_clock::now();
+    
+     // Create CUDA timer                                                 
+    cudaEvent_t  evKStart, evKStop;
+    
+    createCudaEvent(evKStart);
+    createCudaEvent(evKStop);
 
     cudaSetDevice(0);
     
@@ -155,19 +161,20 @@ vector<vector<MotionVector>> fullSearchCUDANaiveGray(const ImageGray& curr, cons
     cout << "CUDA Naive (Grayscale): Launching kernel with " << blockDim.x << "x" << blockDim.y 
         << " threads per block (" << (blockDim.x * blockDim.y) << " total threads)..." << endl;
     
-    // Create kernel timer
-    CudaTimer kernelTimer("Kernel execution");
-    kernelTimer.start();
+    recordCudaEvent(evKStart);
     
     fullSearchKernel<<<gridDim, blockDim>>>(d_curr, d_ref, d_mv, blockSize,
                                             curr.width, d_thread_results, 
                                             threadsPerBlock, searchRange);
     gpuErrorCheck(cudaGetLastError());
-    
+    recordCudaEvent(evKStop);
     cout << "CUDA Naive (Grayscale): Kernel launched, synchronizing..." << endl;
+    
     gpuErrorCheck(cudaDeviceSynchronize());
     
-    float kernelMilliseconds = kernelTimer.stop();;
+   
+    
+    float kernelMilliseconds = elapsedCudaTime(evKStart, evKStop);
     CudaTimingUtils::printKernelTiming("CUDA Naive (Grayscale): Kernel timer:", kernelMilliseconds);
     
     // Copy results back to host
@@ -183,8 +190,13 @@ vector<vector<MotionVector>> fullSearchCUDANaiveGray(const ImageGray& curr, cons
     cudaFree(d_thread_results);
 
     // Stop total timer after cleanup
-    float milliseconds = timer.stop();
-    CudaTimingUtils::printKernelTiming("CUDA Naive (Grayscale): total timing:", milliseconds);
+    auto total_time_stop = std::chrono::high_resolution_clock::now();
+    float total_time = std::chrono::duration<float, std::milli>(total_time_stop - total_time_start).count();
+    metrics.total_ms = total_time;
+    metrics.gpu_kernel1_ms = kernelMilliseconds;
+    
+    destroyCudaEvent(evKStart);
+    destroyCudaEvent(evKStop);
     
     LoggingUtils::printProcessingComplete("CUDA Naive");
     return result;

@@ -8,6 +8,6 @@
 
 
 std::vector<std::vector<MotionVector>> fullSearchCUDAOptimizedGray(const ImageGray& curr, const ImageGray& ref, 
-                                                                    int blockSize, int searchRange);
+                                                                    int blockSize, int searchRange, SingleRunMetrics& metrics);
 
 #endif // FULLSEARCHBM_CUDA_OPTIMIZED_H

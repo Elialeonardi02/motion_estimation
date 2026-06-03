@@ -10,7 +10,7 @@ using namespace std;
 
 // Logarithmic search block matching for grayscale images
 vector<vector<MotionVector>> logarithmicSearchCPUNaiveGray(const ImageGray& curr, const ImageGray& ref,
-                                                           int blockSize, int distance) {
+                                                           int blockSize, int distance, SingleRunMetrics& metrics) {
     // Grid of blocks
     int blocksX, blocksY;
     GridUtils::calculateGridDimensions(curr.width, curr.height, blockSize, blocksX, blocksY);
@@ -80,6 +80,7 @@ vector<vector<MotionVector>> logarithmicSearchCPUNaiveGray(const ImageGray& curr
     
     auto end_time = chrono::high_resolution_clock::now();
     chrono::duration<double> total_time = end_time - start_time;
+    metrics.total_ms = total_time.count();
     LoggingUtils::printTimingReport("CPU Naive Logarithmic", total_time.count());
     
     return mv;

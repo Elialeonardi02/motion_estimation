@@ -35,4 +35,10 @@ struct ImageColor {
     }
 };
 
+struct SingleRunMetrics {
+    float total_ms=0.0f; // total time for the entire block matching process
+    float gpu_kernel1_ms=0.0f; 
+    float gpu_kernel2_ms=0.0f;
+};
+
 #endif // TYPES_H
