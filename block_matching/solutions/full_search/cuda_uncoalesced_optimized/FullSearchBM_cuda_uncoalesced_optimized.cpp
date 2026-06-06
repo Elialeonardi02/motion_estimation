@@ -222,12 +222,18 @@ __global__ void fullSearchKernel(const unsigned char* d_curr, const unsigned cha
     
     cout << "CUDA Uncoalesced Optimized (Grayscale): Launching kernel with " << blockDim.x << "x" << blockDim.y << "x" << blockDim.z
         << " threads per block (" << threadsPerBlock << " total threads)..." << endl;
+
     
     // Allocate shared memory
     // FIXME SMEM size can be reduced reusing partial SAD buffer for redution of total array.
     size_t sharedMemSize = blockSize * blockSize * sizeof(unsigned char) +
                            threadsPerBlock * sizeof(int) +
                            (blockDim.x * blockDim.y) * sizeof(ThreadResult);
+    /*cout << blockSize*blockSize *sizeof(unsigned char) << " bytes for current block, " 
+         << threadsPerBlock * sizeof(int) << " bytes for partial SAD buffer, "
+         << (blockDim.x * blockDim.y) * sizeof(ThreadResult) << " bytes for thread results buffer" << endl;
+    */
+    cout << "CUDA Uncoalesced Optimized (Grayscale): Shared memory per block: " << sharedMemSize / 1024.0f << " KB" << endl;
     
     recordCudaEvent(evKStart);
     

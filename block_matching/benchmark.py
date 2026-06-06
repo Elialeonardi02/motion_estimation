@@ -312,7 +312,7 @@ def main():
     print(f"Time:       {total_time:.2f}s")
     print("="*70)
     if success_count > 0:
-        csv_filename = f"results_{algorithm}_{implementation}.csv"
+        csv_filename = f"results_{algorithm}_{implementation}-bs_{block_size}.csv"
         save_results_to_csv(results, filename=csv_filename)
     return 0 if success_count == len(results) else 1
 
