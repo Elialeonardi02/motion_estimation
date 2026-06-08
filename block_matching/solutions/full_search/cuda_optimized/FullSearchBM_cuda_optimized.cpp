@@ -112,21 +112,38 @@ template<SmemStrategy STRATEGY, int KSAD_THREADS> __global__ void computeSADKern
 }
 
 // Data structure to hold SAD and motion vector components for comparison during reduction in findBestMVKernel
-// grouping SAD + motion vector componest in unique object recudcible by CUB BlockReduce
+// grouping SAD + candidate index in unique object recudcible by CUB BlockReduce
 struct BestMVData {
-    int sad, dx, dy;
+    int sad; // SAD value for this candidate position
+    int bz;  // candidate block index in search window, used to calculate motion vector components dx, dy
 };
 // Finds the best motion vector for each block
 // __forceinline__: reduce function call overheard, this function is called in the reduction loop for every candidate.
 // CUB need a binary operator to compare and reduce BestMVData objecct, CUB is a template library: the operatore will be inlined at compile time inside the reduction loop
 // normal function device ponter cannot be used as binary operator for CUB reduction 
 struct BestMVOp {
+    int startX, startY, width, blockX, blockY; // parameters for calculating candidate block's top-left corner and motion vector components from candidate index bz
+    
+    // 
+    __device__ __forceinline__ BestMVOp(int startX, int startY, int width, int blockX, int blockY) 
+        : startX(startX), startY(startY), width(width), blockX(blockX), blockY(blockY) {}
+
+    // calculate squared distance of the candidate motion vector from the current block's position, used for tie-breaking when SAD values are equal
+    __device__ __forceinline__ int getDistSq(int bz) const {
+        int ref_bx = startX + (bz % width);
+        int ref_by = startY + (bz / width);
+        int dx = ref_bx - blockX;
+        int dy = ref_by - blockY;
+        return dx * dx + dy * dy;
+    }
+
+    // comparison operator for reduction: returns the better of two candidates based on SAD value, with tie-breaking by distance to prefer shorter motion vectors when SAD values are equal
     __device__ __forceinline__
     BestMVData operator()(const BestMVData& a, const BestMVData& b) const {
         if (b.sad < a.sad) return b;
         if (b.sad > a.sad) return a;
         // tie-break: prefer shorter motion vector
-        return (b.dx*b.dx + b.dy*b.dy < a.dx*a.dx + a.dy*a.dy) ? b : a;
+        return (getDistSq(b.bz) < getDistSq(a.bz)) ? b : a;
     }
 };
 
@@ -140,16 +157,13 @@ template<int BLOCK_REDUCE_THREADS>
     // because d_sad array is allocated as blocksX * blocksY * maxCandidates
     const size_t base = (blockIdx.y * gridDim.x + blockIdx.x) * maxCandidates;
 
-    BestMVData local_best = {INT_MAX, 0, 0};
-    const BestMVOp op;
+    BestMVData local_best = {INT_MAX, -1}; 
+    const BestMVOp op(bounds.startX, bounds.startY, bounds.width, blockIdx.x, blockIdx.y); // initialize the comparison operator with parameters needed to calculate candidate block's position and motion vector components 
 
     for (int bz = threadIdx.x; bz < bounds.totalPositions; bz += BLOCK_REDUCE_THREADS) {
-        const int ref_bx = bounds.startX + (bz % bounds.width);
-        const int ref_by = bounds.startY + (bz / bounds.width);
         const BestMVData candidate = {
             d_sad[base + bz],
-            ref_bx - (int)blockIdx.x,
-            ref_by - (int)blockIdx.y
+            bz  
         };
         local_best = op(local_best, candidate);
     }
@@ -158,10 +172,17 @@ template<int BLOCK_REDUCE_THREADS>
     using BlockReduce = cub::BlockReduce<BestMVData, BLOCK_REDUCE_THREADS>;
     __shared__ typename BlockReduce::TempStorage reduce_storage;
     
-    const BestMVData result = BlockReduce(reduce_storage).Reduce(local_best, BestMVOp());
+    const BestMVData result = BlockReduce(reduce_storage).Reduce(local_best, op);
 
-    if (threadIdx.x == 0)  // single thread writes the best motion vector for this block to global memory
-        d_mv[blockIdx.y * gridDim.x + blockIdx.x] = {result.dx, result.dy};
+    if (threadIdx.x == 0){  // single thread writes the best motion vector for this block to global memory
+        int ref_bx = bounds.startX + (result.bz % bounds.width);
+        int ref_by = bounds.startY + (result.bz / bounds.width);
+        
+        d_mv[blockIdx.y * gridDim.x + blockIdx.x] = {
+            ref_bx - (int)blockIdx.x, 
+            ref_by - (int)blockIdx.y
+        };
+    }
 }
 
 //launch computeSADKernel and findBestMVKernel with appropriate template parameters based on SMEM strategy and number of threads for reduction
