@@ -32,7 +32,7 @@ static __device__ int computeSAD_device_partial(const unsigned char* curr, const
         int x = pixelIdx % blockSize;
         // Use __ldg for read-only global memory access (better caching and coalescing)
         // TODO performance are improved, pending test?
-        sad += abs( curr[pixelIdx] - __ldg(&ref[(y2 + y) * refWidth + (x2 + x)])); // reference frame is read only, __ldg intrinsic use read-only cache
+        sad += abs(curr[pixelIdx] - ref[(y2 + y) * refWidth + (x2 + x)]); // reference frame is read only, __ldg intrinsic use read-only cache
     }
     return sad;
 }
