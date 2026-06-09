@@ -11,7 +11,7 @@ using namespace std;
 
 // Full Search Block Matching for grayscale images
 vector<vector<MotionVector>> fullSearchCPUNaiveGray(const ImageGray& curr, const ImageGray& ref,
-                                                     int blockSize, int searchRange) {
+                                                     int blockSize, int searchRange, SingleRunMetrics& metrics) {
     int blocksX, blocksY;
     GridUtils::calculateGridDimensions(curr.width, curr.height, blockSize, blocksX, blocksY);
     vector<vector<MotionVector>> mv = GridUtils::createMotionVectorGrid(blocksX, blocksY);
@@ -51,15 +51,16 @@ vector<vector<MotionVector>> fullSearchCPUNaiveGray(const ImageGray& curr, const
         // Progress every 10 columns
         if((bx + 1) % 10 == 0 || bx == blocksX - 1) {
             auto current_time = chrono::high_resolution_clock::now();
-            chrono::duration<double> elapsed = current_time - start_time;
+            chrono::duration<float, std::milli> elapsed = current_time - start_time;
             int processed = (bx + 1) * blocksY;
             int total = blocksX * blocksY;
             LoggingUtils::printProgressUpdate("CPU Naive", processed, total, elapsed.count());
         }
     }
     auto end_time = chrono::high_resolution_clock::now();
-    chrono::duration<double> total_time = end_time - start_time;
-    LoggingUtils::printTimingReport("CPU Naive", total_time.count());
+    chrono::duration<float, std::milli> total_time_ms = end_time - start_time;
+    metrics.total_ms = total_time_ms.count();
+    LoggingUtils::printTimingReport("CPU Naive", total_time_ms.count());
     return mv;
 }
 

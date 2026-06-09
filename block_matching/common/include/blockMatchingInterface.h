@@ -14,7 +14,7 @@ public:
     virtual std::vector<std::vector<MotionVector>> matchGray(
         const ImageGray& curr, 
         const ImageGray& ref,
-        int blockSize) = 0;
+        int blockSize, SingleRunMetrics& metrics) = 0;
     
     // Compute motion vectors for RGB color images
     virtual std::vector<std::vector<MotionVector>> matchRGB(

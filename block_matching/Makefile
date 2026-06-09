@@ -1,8 +1,8 @@
 NVXX            = nvcc
-NVXXFLAGS       = -std=c++17 -x cu -Xcompiler -fPIE
+NVXXFLAGS       = -std=c++20 -x cu -Xcompiler -fPIE
 NVOPTFLAGS      = -w -O3 --gpu-architecture=compute_80 --gpu-code=sm_80
 
-CXXFLAGS        = -std=c++17 -Wall -Wextra -O2 -fPIE -fpic
+CXXFLAGS        = -std=c++20 -Wall -Wextra -O2 -fPIE -fpic
 
 INCLUDE_DIRS    = -Icommon/include \
                   -Isolutions/full_search/include \

@@ -262,18 +262,16 @@ int main(int argc, char* argv[]) {
                     throw runtime_error("Unsupported format: " + format);
                 }
 
-                chrono::high_resolution_clock::time_point start = chrono::high_resolution_clock::now();
-                vector<vector<MotionVector>> mv = matcher->matchGray(curr_frame, ref_frame, blockSize);
+                SingleRunMetrics metrics;
+                vector<vector<MotionVector>> mv = matcher->matchGray(curr_frame, ref_frame, blockSize, metrics);
                 for (size_t i = 0; i < mv.size(); i++) {
                     for (size_t j = 0; j < mv[i].size(); j++) {
                         std::cout << "mv[" << i << "][" << j << "] = ("
                                 << mv[i][j].dx << ", " << mv[i][j].dy << ")\n";
                     }
                 }
-                chrono::high_resolution_clock::time_point end = chrono::high_resolution_clock::now();
-                chrono::duration<double> elapsed = end - start;
-                cout << "Matching time: " << elapsed.count() << " s" << endl;
-                
+                //chrono::high_resolution_clock::time_point end = chrono::high_resolution_clock::now();
+                //chrono::duration<double> elapsed = end - start;
                 string output_name = generateOutputFilename(isRange, range_start, i, ref_path, curr_path);
                 string output_path = output_dir + "/" + output_name;
                 savePPM(drawMotionVectors(curr_frame, ref_frame, mv, blockSize), output_path);
@@ -294,6 +292,11 @@ int main(int argc, char* argv[]) {
                 string curr_grid_path = output_path.substr(0, last_dot) + "_curr_grid.ppm";
                 savePPM(drawFrameWithGrid(curr_frame, blockSize), curr_grid_path);
                 cout << "Current frame with grid saved in " << curr_grid_path << endl;
+
+                cout << "Total time: " << metrics.total_ms << " ms" << endl;
+                cout << "GPU kernel 1 time: " << metrics.gpu_kernel1_ms << " ms" << endl;
+                cout << "GPU kernel 2 time: " << metrics.gpu_kernel2_ms << " ms" << endl;
+                
             }
         } catch(const exception& e) {
             cerr << "Error during processing: " << e.what() << endl;

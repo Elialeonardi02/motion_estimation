@@ -8,6 +8,7 @@
 #include "utils.h"
 #include "cuda_utils.h"
 #include "sad_utils.h"
+#include <chrono>
 
 using namespace std;
 
@@ -31,7 +32,7 @@ static __device__ int computeSAD_device_partial(const unsigned char* curr, const
         int x = pixelIdx % blockSize;
         // Use __ldg for read-only global memory access (better caching and coalescing)
         // TODO performance are improved, pending test?
-        sad += abs( curr[pixelIdx] - __ldg(&ref[(y2 + y) * refWidth + (x2 + x)])); // reference frame is read only, __ldg intrinsic use read-only cache
+        sad += abs(curr[pixelIdx] - ref[(y2 + y) * refWidth + (x2 + x)]); // reference frame is read only, __ldg intrinsic use read-only cache
     }
     return sad;
 }
@@ -155,10 +156,14 @@ __global__ void fullSearchKernel(const unsigned char* d_curr, const unsigned cha
 
 
  vector<vector<MotionVector>> fullSearchCUDAUncoalescedOptimizedGray(const ImageGray& curr, const ImageGray& ref,
-                                                                    int blockSize, int searchRange) {
-    // Create CUDA
-    CudaTimer timer("Total timer");
-    timer.start();
+                                                                    int blockSize, int searchRange, SingleRunMetrics& metrics) {
+    
+    auto total_time_start = std::chrono::high_resolution_clock::now();
+     // Create CUDA timer                                                 
+    cudaEvent_t  evKStart, evKStop;
+    
+    createCudaEvent(evKStart);
+    createCudaEvent(evKStop);
 
     cudaSetDevice(0);
     
@@ -217,25 +222,31 @@ __global__ void fullSearchKernel(const unsigned char* d_curr, const unsigned cha
     
     cout << "CUDA Uncoalesced Optimized (Grayscale): Launching kernel with " << blockDim.x << "x" << blockDim.y << "x" << blockDim.z
         << " threads per block (" << threadsPerBlock << " total threads)..." << endl;
-    
-    // Create kernel timer
-    CudaTimer kernelTimer("Kernel execution");
-    kernelTimer.start();
+
     
     // Allocate shared memory
     // FIXME SMEM size can be reduced reusing partial SAD buffer for redution of total array.
     size_t sharedMemSize = blockSize * blockSize * sizeof(unsigned char) +
                            threadsPerBlock * sizeof(int) +
                            (blockDim.x * blockDim.y) * sizeof(ThreadResult);
+    /*cout << blockSize*blockSize *sizeof(unsigned char) << " bytes for current block, " 
+         << threadsPerBlock * sizeof(int) << " bytes for partial SAD buffer, "
+         << (blockDim.x * blockDim.y) * sizeof(ThreadResult) << " bytes for thread results buffer" << endl;
+    */
+    cout << "CUDA Uncoalesced Optimized (Grayscale): Shared memory per block: " << sharedMemSize / 1024.0f << " KB" << endl;
+    
+    recordCudaEvent(evKStart);
     
     fullSearchKernel<<<gridDim, blockDim, sharedMemSize>>>(d_curr, d_ref, d_mv, blockSize,
                                             curr.width, threadsPerBlock, searchRange);
     gpuErrorCheck(cudaGetLastError());
     
+    recordCudaEvent(evKStop);
+    
     cout << "CUDA Uncoalesced Optimized (Grayscale): Kernel launched, synchronizing..." << endl;
     gpuErrorCheck(cudaDeviceSynchronize());
-    
-    float kernelMilliseconds = kernelTimer.stop();
+
+    float kernelMilliseconds = elapsedCudaTime(evKStart, evKStop);
     cout << "CUDA Uncoalesced Optimized (Grayscale): Timing:" << endl;
     CudaTimingUtils::printKernelTiming("CUDA Uncoalesced Optimized (Grayscale): Kernel timing:", kernelMilliseconds);
     
@@ -251,8 +262,13 @@ __global__ void fullSearchKernel(const unsigned char* d_curr, const unsigned cha
     GPUMemoryUtils::freeMemory(d_curr, d_ref, d_mv);
 
     // Stop total timer after cleanup
-    float milliseconds = timer.stop();
-    CudaTimingUtils::printKernelTiming("CUDA Uncoalesced Optimized (Grayscale): Total timing:", milliseconds);
+    auto total_time_stop = std::chrono::high_resolution_clock::now();
+    float total_time = std::chrono::duration<float, std::milli>(total_time_stop - total_time_start).count();
+    metrics.total_ms = total_time;
+    metrics.gpu_kernel1_ms = kernelMilliseconds;
+
+    destroyCudaEvent(evKStart);
+    destroyCudaEvent(evKStop);
     
     LoggingUtils::printProcessingComplete("CUDA Uncoalesced Optimized");
     return result;

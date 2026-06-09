@@ -18,6 +18,6 @@
 
 // Declaration - implementation is in FullSearchBM_cuda_naive.cpp
 std::vector<std::vector<MotionVector>> fullSearchCUDANaiveGray(const ImageGray& curr, const ImageGray& ref, 
-                                                                int blockSize, int searchRange);
+                                                                int blockSize, int searchRange, SingleRunMetrics& metrics);
 
 #endif // FULLSEARCHBM_CUDA_NAIVE_H

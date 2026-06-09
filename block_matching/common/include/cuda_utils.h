@@ -2,6 +2,7 @@
 #define CUDA_UTILS_H
 
 #include <cuda_runtime.h>
+#include <cub/cub.cuh>
 #include <iostream>
 #include <stdexcept>
 #include <string>

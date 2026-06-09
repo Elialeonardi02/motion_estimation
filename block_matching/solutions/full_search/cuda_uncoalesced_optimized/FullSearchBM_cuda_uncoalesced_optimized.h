@@ -6,6 +6,6 @@
 #include "types.h"
 
 std::vector<std::vector<MotionVector>> fullSearchCUDAUncoalescedOptimizedGray(const ImageGray& curr, const ImageGray& ref,
-                                                                              int blockSize, int searchRange);
+                                                                              int blockSize, int searchRange, SingleRunMetrics& metrics);
 
 #endif // FULLSEARCHBM_CUDA_UNCOALESCED_OPTIMIZED_H
