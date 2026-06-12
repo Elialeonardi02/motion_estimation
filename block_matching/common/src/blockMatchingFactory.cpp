@@ -1,6 +1,4 @@
 #include "blockMatchingInterface.h"
-#include "fullSearchBM_cpu_naive.h"
-#include "logarithmicSearchBM_cpu_naive.h"
 #include <stdexcept>
 #include <iostream>
 #include <memory>
@@ -23,6 +21,9 @@ extern std::vector<std::vector<MotionVector>> fullSearchCUDAOptimizedGray(
 
 extern std::vector<std::vector<MotionVector>> fullSearchCUDAUncoalescedOptimizedGray(
     const ImageGray& curr, const ImageGray& ref, int blockSize, int searchRange, SingleRunMetrics& metrics);
+
+extern std::vector<std::vector<MotionVector>> logarithmicSearchCUDAOptimizedGray(
+    const ImageGray& curr, const ImageGray& ref, int blockSize, int searchDistance, SingleRunMetrics& metrics);
 #endif
 
 // BASE CLASSES
@@ -83,6 +84,26 @@ public:
     }
 };
 
+class LogarithmicSearchBlockMatcherCUDAOptimized : public BlockMatcher {
+private:
+    int distance = 32;
+    
+public:
+    std::vector<std::vector<MotionVector>> matchGray(
+        const ImageGray& curr, const ImageGray& ref, int blockSize, SingleRunMetrics& metrics) override {
+        return logarithmicSearchCUDAOptimizedGray(curr, ref, blockSize, distance, metrics);
+    }
+    
+    std::vector<std::vector<MotionVector>> matchRGB(
+        const ImageColor&, const ImageColor&, int) override {
+        throw std::runtime_error("Logarithmic search RGB implementation not available");
+    }
+    
+    void setDistance(int d) override {
+        distance = d;
+    }
+};
+
 #else
 
 // Stub implementations when CUDA is not available
@@ -106,6 +127,19 @@ class FullSearchBlockMatcherCUDAUncoalescedOptimized : public FullSearchBlockMat
 public:
     std::vector<std::vector<MotionVector>> matchGray(
         const ImageGray&, const ImageGray&, int, SingleRunMetrics&) override {
+        throw std::runtime_error("CUDA support is not available. Compile with CUDA support enabled.");
+    }
+};
+
+class LogarithmicSearchBlockMatcherCUDAOptimized : public BlockMatcher {
+public:
+    std::vector<std::vector<MotionVector>> matchGray(
+        const ImageGray&, const ImageGray&, int, SingleRunMetrics&) override {
+        throw std::runtime_error("CUDA support is not available. Compile with CUDA support enabled.");
+    }
+
+    std::vector<std::vector<MotionVector>> matchRGB(
+        const ImageColor&, const ImageColor&, int) override {
         throw std::runtime_error("CUDA support is not available. Compile with CUDA support enabled.");
     }
 };
@@ -155,6 +189,8 @@ std::unique_ptr<BlockMatcher> createBlockMatcher(
     } else if (algorithm == "logarithmic_search") {
         if (implementation == "cpu_naive") {
             return std::make_unique<LogarithmicSearchBlockMatcherCPUNaive>();
+        } else if (implementation == "cuda_optimized") {
+            return std::make_unique<LogarithmicSearchBlockMatcherCUDAOptimized>();
         } else {
             throw std::runtime_error("Unknown implementation '" + implementation + 
                                    "' for algorithm '" + algorithm + "'");

@@ -4,7 +4,7 @@
 #include <cstring>
 #include <limits>
 #include <cuda_runtime.h>
-#include "FullSearchBM_cuda_uncoalesced_optimized.h"
+#include "fullSearchBM_cuda_uncoalesced_optimized.h"
 #include "utils.h"
 #include "cuda_utils.h"
 #include "sad_utils.h"
@@ -273,5 +273,3 @@ __global__ void fullSearchKernel(const unsigned char* d_curr, const unsigned cha
     LoggingUtils::printProcessingComplete("CUDA Uncoalesced Optimized");
     return result;
 }
-
-

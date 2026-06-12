@@ -4,7 +4,7 @@
 #include <cstring>
 #include <limits>
 #include <cuda_runtime.h>
-#include "FullSearchBM_cuda_naive.h"
+#include "fullSearchBM_cuda_naive.h"
 #include "utils.h"
 #include "cuda_utils.h"
 #include "sad_utils.h"
