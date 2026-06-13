@@ -12,103 +12,122 @@
 
 using namespace std;
 
-// Structure to hold thread results
-struct ThreadResult {
-    int sad;
-    int dx;
-    int dy;
-};
-
-// Device function to compute SAD between two blocks
-static __device__ int computeSAD_device(const unsigned char* curr, const unsigned char* ref,
-                                 int x1, int y1, int x2, int y2, int blockSize, int width) {
+/* Device function to compute SAD between two blocks
+ parameters:
+    -d_curr: pointer to current frame in GMEM.
+    -d_ref: pointer to reference frame in GMEM.
+    -curr_x, curry_y: top-left corner of the block in current frame in pixels.
+    -ref_x, ref_y: top-left corner of the block in reference frame in pixels.
+    -blockSize: size of the frame blocks.
+    -width, height: dimensions of the frames.
+ return:
+    -sad value between the two blocks, or INT_MAX if any part of the block is out of frame bounds.
+*/
+static __device__ __inline__ int computeSAD_device(const unsigned char* d_curr, const unsigned char* d_ref,
+                                int curr_x, int curry_y, int ref_x, int ref_y, int blockSize, int width, int height) {
     int sad = 0;
     
-    for(int y = 0; y < blockSize; y++)
-        for(int x = 0; x < blockSize; x++)
-            sad += abs(curr[(y1 + y) * width + (x1 + x)] - ref[(y2 + y) * width + (x2 + x)]);
+    // loop over block rows
+    for(int by = 0; by < blockSize; by++) { 
+        int cy = curry_y + by; // top-left corner of the block in current frame in pixels + block row offset
+        int ry = ref_y + by; // top-left corner of the block in reference frame in pixels + block row offset
+        if (cy >= height || ry >= height || cy < 0 || ry < 0) return INT_MAX; // overflow check: if we are beyond the height of the frame
+        // loop over block columns
+        for(int bx = 0; bx < blockSize; bx++) { 
+            int cx = curr_x + bx; // top-left corner of the block in current frame in pixels + block column offset
+            int rx = ref_x + bx; // top-left corner of the block in reference frame in pixels + block column offset
+            if (cx >= width || rx >= width || cx < 0 || rx < 0) return INT_MAX; // overflow check: if we are beyond the width of the frame
+            // compute and accumulate SAD
+            sad += abs((int)d_curr[cy * width + cx] - (int)d_ref[ry * width + rx]);
+        }
+    }
     return sad;
 }
 
-// CUDA kernel: each grid block processes one search block of current frame
-__global__ void fullSearchKernel(const unsigned char* d_curr, const unsigned char* d_ref,
-                                 MotionVector* d_mv, int blockSize, int width, ThreadResult* d_thread_results, 
-                                 int threadsPerBlock, int searchRange)  {
+/* CUDA kernel: performs full search block matching, each thread computes SAD for one candidate position in the search window, and finds the best match using block reduction
+ parameters:
+    -d_curr: pointer to current frame in GMEM.
+    -d_ref: pointer to reference frame in GMEM.
+    -d_mv: pointer to final motion vectors in GMEM.
+    -blockSize: size of the frame blocks.
+    -width, height: dimensions of the frames.
+    -searchRange: range of the search window.
+ threadsPerBlockDim: number of threads per cuda block dimension
+*/
+template <int threadsPerBlockDim>
+__global__ void fullSearchNaiveKernel(const unsigned char* d_curr, const unsigned char* d_ref,
+                                MotionVector* d_mv, int blockSize, int width, int height, int searchRange)  {
     // Grid and thread indices
     int tidx = threadIdx.y * blockDim.x + threadIdx.x;
-    int total_threads = blockDim.x * blockDim.y;
+    int constexpr total_threads = threadsPerBlockDim * threadsPerBlockDim; // total threads per block
     
-    // Current block top-left corner
+    // Current block top-left corner in pixels
     int x = blockIdx.x * blockSize;
     int y = blockIdx.y * blockSize;
     
     // Calculate search window using helper function
     CudaSearchBounds bounds = calculateCudaSearchBounds(blockIdx.x, blockIdx.y, gridDim.x, gridDim.y, searchRange);
-    
     // Thread-local best match
-    int best_sad = INT_MAX;
-    int best_dx = 0, best_dy = 0;
-     // total_threads < totalPosition, thread processes its assigned positions (i, i+total_threads, i+2*total_threads, ...)
+    CandidateSad local_best = {INT_MAX, 0, 0}; // initialize local best SAD to max and motion vector to (0,0)
+    int  bestDist = INT_MAX; // for tie-breaking, initialize to max
+    
+    // reduction1: Each thread computes SAD for its assigned candidate positions in the search window
+    // total_threads < totalPosition, thread processes its assigned positions (i, i+total_threads, i+2*total_threads, ...)
     // total_threads = totalPosition, thread processes only one assigned position.
     for (int pos = tidx; pos < bounds.totalPositions; pos += total_threads) {
         // Convert position to 2D coordinates within search window
-        int ref_bx = bounds.startX + (pos % bounds.width);
-        int ref_by = bounds.startY + (pos / bounds.width);
-        int ref_x = ref_bx * blockSize;
-        int ref_y = ref_by * blockSize;
+        int ref_bx = bounds.startX + (pos % bounds.width); // candidate block top-left corner in reference frame in block coordinates
+        int ref_by = bounds.startY + (pos / bounds.width); // candidate block top-left corner in reference frame in block coordinates
+        int ref_x = ref_bx * blockSize; // candidate block top-left corner in reference frame in pixels
+        int ref_y = ref_by * blockSize; // candidate block top-left corner in reference frame in pixels
         
-        int sad = computeSAD_device(d_curr, d_ref, x, y, ref_x, ref_y, blockSize, width);
-        int dist = (ref_x - x) * (ref_x - x) + (ref_y - y) * (ref_y - y);
-        int best_dist = best_dx * best_dx + best_dy * best_dy; // local best distance for tie-breaking
-        if (sad < best_sad || (sad == best_sad && dist < best_dist)) { // update local best match
-            best_sad = sad;
-            best_dx = (ref_x - x) ; // local best dx
-            best_dy = (ref_y - y); // local best dy
+        int sad = computeSAD_device(d_curr, d_ref, x, y, ref_x, ref_y, blockSize, width, height); // compute SAD for the candidate position
+    
+        int dx = ref_bx - blockIdx.x; // motion vector x component in block coordinates
+        int dy = ref_by - blockIdx.y; // motion vector y component in block coordinates
+        int dist = dx *dx + dy * dy;// local best distance for tie-breaking
+        if (sad < local_best.sad || (sad == local_best.sad && dist < bestDist)) { // update local best match
+            local_best.sad = sad; 
+            local_best.dx = dx ; // local best dx
+            local_best.dy = dy; // local best dy
+            bestDist = dist;  
         }
     }
     
-    // Write thread result to global memory
-    int result_idx = (blockIdx.x + blockIdx.y * gridDim.x ) * threadsPerBlock + tidx;
-    d_thread_results[result_idx] = {best_sad, best_dx/blockSize, best_dy/blockSize}; // store block-level motion vector (dx, dy) by converting from pixel-level to block-level displacement
+    // reduction2: Block reduction to find the best match among all threads in the block
+    typedef cub::BlockReduce<CandidateSad, threadsPerBlockDim, cub::BLOCK_REDUCE_WARP_REDUCTIONS, threadsPerBlockDim> BlockReduceT;
+    __shared__ typename BlockReduceT::TempStorage temp_storage;
+    CandidateSad block_best = BlockReduceT(temp_storage).Reduce(local_best, MotionVectorUtils::CandidateSadOp());
     
-    __syncthreads();
-    
-    // Thread (0,0) finds global best among all threads in this block
-    if (tidx == 0) {
-        int global_best_sad = INT_MAX;
-        int global_best_dx = 0, global_best_dy = 0;
-        int global_best_dist = INT_MAX;
-        for (int i = 0; i < total_threads; i++) {
-            int idx = (blockIdx.x + blockIdx.y * gridDim.x) * threadsPerBlock + i;
-            int dist = d_thread_results[idx].dx * d_thread_results[idx].dx + d_thread_results[idx].dy * d_thread_results[idx].dy; // distance for tie-breaking 
-            if (d_thread_results[idx].sad < global_best_sad || (d_thread_results[idx].sad == global_best_sad && dist < global_best_dist)) { // update global best match
-                global_best_sad = d_thread_results[idx].sad;
-                global_best_dx = d_thread_results[idx].dx;
-                global_best_dy = d_thread_results[idx].dy;
-                global_best_dist = dist; // current global best distance for tie-breaking
-            }
-        }
-        
-        d_mv[blockIdx.y * gridDim.x + blockIdx.x] = {global_best_dx, global_best_dy}; // write final best motion vector for this block to global memory
+    // Write the best motion vector for this current frame block to gmem
+    if (tidx == 0){
+        d_mv[blockIdx.y * gridDim.x + blockIdx.x] = {block_best.dx, block_best.dy};
     }
 }
 
-
+/* Full search block matching implementation using CUDA naive approach for grayscale images
+ parameters:
+    -curr: current frame in grayscale.
+    -ref: reference frame in grayscale.
+    -blockSize: size of the frame blocks.
+    -searchRange: range of the search window.
+    -metrics: struct to store timing metrics for this run.
+ return:
+    -2D vector of motion vectors for each block in the current frame, where each motion vector represents the best match found in the reference frame within the search window
+*/
 vector<vector<MotionVector>> fullSearchCUDANaiveGray(const ImageGray& curr, const ImageGray& ref, 
-                                                     int blockSize, int searchRange, SingleRunMetrics& metrics) {
+                                                    int blockSize, int searchRange, SingleRunMetrics& metrics) {
     
     auto total_time_start = std::chrono::high_resolution_clock::now();
     
-     // Create CUDA timer                                                 
+    // Create CUDA timer                                                 
     cudaEvent_t  evKStart, evKStop;
     
     createCudaEvent(evKStart);
     createCudaEvent(evKStop);
-
     cudaSetDevice(0);
     
     ValidationUtils::validateFrameDimensions(curr, ref);
-    
     // Calculate grid dimensions
     int blocksX, blocksY;
     GridUtils::calculateGridDimensions(curr.width, curr.height, blockSize, blocksX, blocksY);
@@ -119,29 +138,31 @@ vector<vector<MotionVector>> fullSearchCUDANaiveGray(const ImageGray& curr, cons
     
     // Determine threads per block
     cudaDeviceProp prop;
+    int threadsPerBlockX; 
+    int threadsPerBlockY;
+    int threadsPerBlockDim = 1;  
     cudaGetDeviceProperties(&prop, 0);
-    int maxThreadsPerBlock = prop.maxThreadsPerBlock;
-    int threadsPerBlockX = blocksX;
-    int threadsPerBlockY = blocksY;
+    // searchRange > 0,  range search
     if (searchRange > 0) {
         // limit threads per block based on search range
         // if range is bigger than frame size, it will be clamped to frame size.
-        threadsPerBlockX = min(threadsPerBlockX, searchRange * 2 + 1); 
-        threadsPerBlockY = min(threadsPerBlockY, searchRange * 2 + 1); 
+        threadsPerBlockX = min(blocksX, searchRange * 2 + 1); 
+        threadsPerBlockY = min(blocksY, searchRange * 2 + 1); 
     }
-    int threadsPerBlock = threadsPerBlockX * threadsPerBlockY;
-    if (threadsPerBlock > maxThreadsPerBlock) {
-        threadsPerBlockX = sqrt(maxThreadsPerBlock);
-        threadsPerBlockY = threadsPerBlockX;
-        threadsPerBlock = maxThreadsPerBlock;
+    else { // searchRange = 0, full search
+        threadsPerBlockX = blocksX;
+        threadsPerBlockY = blocksY;
     }
-    
+    // Determine the largest power of two that is less than or equal to the minimum of threadsPerBlockX * threadsPerBlockY
+    int threadsPerBlockDimLimit = sqrt (min (threadsPerBlockX * threadsPerBlockY,  prop.maxThreadsPerBlock));
+    while (threadsPerBlockDim < threadsPerBlockDimLimit) {
+        threadsPerBlockDim <<= 1;
+    }
     // Allocate GPU memory for frames
     unsigned char* d_curr = nullptr;
     unsigned char* d_ref = nullptr;
     size_t bytesPerFrame = 0;
     GPUMemoryUtils::allocateFrames(curr, ref, d_curr, d_ref, bytesPerFrame);
-    
     LoggingUtils::printCopyingToGPU("CUDA Naive");
     GPUMemoryUtils::copyFramesToGPU(d_curr, d_ref, curr, ref, bytesPerFrame);
     
@@ -150,29 +171,44 @@ vector<vector<MotionVector>> fullSearchCUDANaiveGray(const ImageGray& curr, cons
     MotionVector* d_mv = nullptr;
     gpuErrorCheck(cudaMalloc((void**)&d_mv, mvSize));
 
-    // Allocate GPU global memory for thread results
-    size_t threadResultsSize = (size_t)blocksX * blocksY * threadsPerBlock * sizeof(ThreadResult);
-    ThreadResult* d_thread_results = nullptr;
-    gpuErrorCheck(cudaMalloc((void**)&d_thread_results, threadResultsSize));
-    
+    // Launch CUDA kernel
     dim3 gridDim(blocksX, blocksY);
-    dim3 blockDim(threadsPerBlockX, threadsPerBlockY);
+    dim3 blockDim(threadsPerBlockDim, threadsPerBlockDim);
     
     cout << "CUDA Naive (Grayscale): Launching kernel with " << blockDim.x << "x" << blockDim.y 
-        << " threads per block (" << (blockDim.x * blockDim.y) << " total threads)..." << endl;
+        << " threads per block (" << (threadsPerBlockDim * threadsPerBlockDim) << " total threads)..." << endl;
     
     recordCudaEvent(evKStart);
-    
-    fullSearchKernel<<<gridDim, blockDim>>>(d_curr, d_ref, d_mv, blockSize,
-                                            curr.width, d_thread_results, 
-                                            threadsPerBlock, searchRange);
+    switch (threadsPerBlockDim) {
+        case 1: // 1 thread per block
+            fullSearchNaiveKernel<1><<<gridDim, blockDim>>>(d_curr, d_ref, d_mv, blockSize,
+                                            curr.width, curr.height, searchRange);
+            break;
+        case 2: // 4 threads per block
+            fullSearchNaiveKernel<2><<<gridDim, blockDim>>>(d_curr, d_ref, d_mv, blockSize,
+                                            curr.width, curr.height, searchRange);
+            break;
+        case 4: // 16 threads per block
+            fullSearchNaiveKernel<4><<<gridDim, blockDim>>>(d_curr, d_ref, d_mv, blockSize,
+                                            curr.width, curr.height, searchRange);
+            break;
+        case 8: // 64 threads per block
+            fullSearchNaiveKernel<8><<<gridDim, blockDim>>>(d_curr, d_ref, d_mv, blockSize,
+                                            curr.width, curr.height, searchRange);
+            break;
+        case 16: // 256 threads per block
+            fullSearchNaiveKernel<16><<<gridDim, blockDim>>>(d_curr, d_ref, d_mv, blockSize,
+                                            curr.width, curr.height, searchRange);
+            break;
+        case 32: // 1024 threads per block
+            fullSearchNaiveKernel<32><<<gridDim, blockDim>>>(d_curr, d_ref, d_mv, blockSize,
+                                            curr.width, curr.height, searchRange);
+            break;
+    }
     gpuErrorCheck(cudaGetLastError());
     recordCudaEvent(evKStop);
     cout << "CUDA Naive (Grayscale): Kernel launched, synchronizing..." << endl;
-    
     gpuErrorCheck(cudaDeviceSynchronize());
-    
-   
     
     float kernelMilliseconds = elapsedCudaTime(evKStart, evKStop);
     CudaTimingUtils::printKernelTiming("CUDA Naive (Grayscale): Kernel timer:", kernelMilliseconds);
@@ -187,8 +223,6 @@ vector<vector<MotionVector>> fullSearchCUDANaiveGray(const ImageGray& curr, cons
     // Cleanup
     LoggingUtils::printCleanupGPU("CUDA Naive");
     GPUMemoryUtils::freeMemory(d_curr, d_ref, d_mv);
-    cudaFree(d_thread_results);
-
     // Stop total timer after cleanup
     auto total_time_stop = std::chrono::high_resolution_clock::now();
     float total_time = std::chrono::duration<float, std::milli>(total_time_stop - total_time_start).count();
@@ -201,5 +235,3 @@ vector<vector<MotionVector>> fullSearchCUDANaiveGray(const ImageGray& curr, cons
     LoggingUtils::printProcessingComplete("CUDA Naive");
     return result;
 }
-
-

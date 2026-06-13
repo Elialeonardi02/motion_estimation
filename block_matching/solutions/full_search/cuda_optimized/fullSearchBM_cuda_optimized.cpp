@@ -115,13 +115,13 @@ template<SmemStrategy STRATEGY, int KSAD_THREADS> __global__ void computeSADKern
 
 // Data structure to hold SAD and motion vector components for comparison during reduction in findBestMVKernel
 // grouping SAD + candidate index in unique object recudcible by CUB BlockReduce
-struct CandidateSad {
+struct CandidateSadLidx {
     int sad; // SAD value for this candidate position
     int flat_idx;  // candidate block index in search window, used to calculate motion vector components dx, dy
 };
 // Finds the best motion vector for each block
 // __forceinline__: reduce function call overheard, this function is called in the reduction loop for every candidate.
-// CUB need a binary operator to compare and reduce CandidateSad objecct, CUB is a template library: the operatore will be inlined at compile time inside the reduction loop
+// CUB need a binary operator to compare and reduce CandidateSadLidx objecct, CUB is a template library: the operatore will be inlined at compile time inside the reduction loop
 // normal function device ponter cannot be used as binary operator for CUB reduction 
 struct CandidateSadOp {
     int startX, startY, width, blockX, blockY; // parameters for calculating candidate block's top-left corner and motion vector components from candidate index bz
@@ -141,7 +141,7 @@ struct CandidateSadOp {
 
     // comparison operator for reduction: returns the better of two candidates based on SAD value, with tie-breaking by distance to prefer shorter motion vectors when SAD values are equal
     __device__ __forceinline__
-    CandidateSad operator()(const CandidateSad& a, const CandidateSad& b) const {
+    CandidateSadLidx operator()(const CandidateSadLidx& a, const CandidateSadLidx& b) const {
         if (b.sad < a.sad) return b;
         if (b.sad > a.sad) return a;
         // tie-break: prefer shorter motion vector
@@ -159,12 +159,12 @@ template<int BLOCK_REDUCE_THREADS>
     // because d_sad array is allocated as blocksX * blocksY * maxCandidates
     const size_t base = (blockIdx.y * gridDim.x + blockIdx.x) * maxCandidates;
 
-    CandidateSad local_best = {INT_MAX, -1}; 
+    CandidateSadLidx local_best = {INT_MAX, -1}; 
     const CandidateSadOp op(bounds.startX, bounds.startY, bounds.width, blockIdx.x, blockIdx.y); // initialize the comparison operator with parameters needed to calculate candidate block's position and motion vector components 
 
     // each thread compares a subset of candidate positions in the search window to find the best motion vector for this block 
     for (int flat_idx = threadIdx.x; flat_idx < bounds.totalPositions; flat_idx += BLOCK_REDUCE_THREADS) {
-        const CandidateSad candidate = {
+        const CandidateSadLidx candidate = {
             d_sad[base + flat_idx], // SAD value for this candidate position, read from GMEM
             flat_idx     // candidate block linear index in the search window, used to calculate candidate block's position and motion vector components in the comparison operator
         };
@@ -172,10 +172,10 @@ template<int BLOCK_REDUCE_THREADS>
     }
     
     // CUB block reduce for finding the best motion vector among candidate positions for this block, using CandidateSadOp as the reduction operator
-    using BlockReduce = cub::BlockReduce<CandidateSad, BLOCK_REDUCE_THREADS>;
+    using BlockReduce = cub::BlockReduce<CandidateSadLidx, BLOCK_REDUCE_THREADS>;
     __shared__ typename BlockReduce::TempStorage reduce_storage;
   
-    const CandidateSad result = BlockReduce(reduce_storage).Reduce(local_best, op);
+    const CandidateSadLidx result = BlockReduce(reduce_storage).Reduce(local_best, op);
 
     if (threadIdx.x == 0){  // single thread writes the best motion vector for this block to global memory
         int ref_bx = bounds.startX + (result.flat_idx % bounds.width);

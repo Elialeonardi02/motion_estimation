@@ -14,15 +14,6 @@ using namespace std;
 // logarithmic search: each thread computes SAD between 9 pair (curr, ref), iterating until the search distance is reduced to 1 block  
 constexpr int MAXCANDIDATES_AT_DISTANCE= 9;
 
-// structure to hold SAD and candidate block index for comparison
-// memory allignment: 4+2+2 = 8 bytes, so each CandidateSad can be stored in one 64-bit word, allowing for coalesced memory access
-struct CandidateSad {
-    int sad; // best SAD found so far 
-    short dx;  // shift in x direction from the current block to the candidate block
-    short dy;  // shift in y direction from the current block to the candidate block
-
-};
-
 // SMEM strategy, determined at compile time based on available shared memory
 enum class SmemStrategy {
     FULL,       // curr block + ref block in SMEM  (small blockSize)
@@ -168,7 +159,7 @@ template<SmemStrategy STRATEGY, int KSAD_THREADS> __global__ void computeSADKern
     }
 
     // reduction1: block reduction of partial SAD values to get total SAD for this candidate position, using CUB BlockReduce 
-     const int total_sad = BlockReduce(reduce_storage).Sum(partial_sad);
+    const int total_sad = BlockReduce(reduce_storage).Sum(partial_sad);
             
     if (threadIdx.x == 0) {
         d_sad_candidates[frameBlockIdx * MAXCANDIDATES_AT_DISTANCE + blockIdx.z] = {total_sad, cand_dx, cand_dy}; 

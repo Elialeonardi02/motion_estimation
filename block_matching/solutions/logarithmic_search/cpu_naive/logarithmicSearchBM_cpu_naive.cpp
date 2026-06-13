@@ -2,7 +2,7 @@
 #include "sad_utils.h"
 #include "utils.h"
 #include <cmath>
-#include <limits>
+#include <climits>
 #include <iostream>
 #include <chrono>
 
@@ -40,9 +40,8 @@ vector<vector<MotionVector>> logarithmicSearchCPUNaiveGray(const ImageGray& curr
                 // (-d,d), (0,d), (d,d), 
                 // (-d,0), (0,0), (d,0), 
                 // (-d,-d), (0,-d), (d,-d)
-                int iterBestSAD = numeric_limits<int>::max();
-                int iterBestDist = numeric_limits<int>::max();
-                
+                int iterBestSAD = INT_MAX;
+                int iterBestDist = INT_MAX;
                 for (int ry = -currentDistance; ry <= currentDistance; ry += currentDistance) {
                     for (int rx = -currentDistance; rx <= currentDistance; rx += currentDistance) {
                         int cand_bx = cx + rx ; // candidate block's x in the reference frame
