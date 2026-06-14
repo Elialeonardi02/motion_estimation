@@ -158,7 +158,7 @@ vector<vector<MotionVector>> fullSearchCUDANaiveGray(const ImageGray& curr, cons
     while (threadsPerBlockDim < threadsPerBlockDimLimit) {
         threadsPerBlockDim <<= 1;
     }
-    // Allocate GPU memory for frames
+    // Allocate and copy GPU memory for frames
     unsigned char* d_curr = nullptr;
     unsigned char* d_ref = nullptr;
     size_t bytesPerFrame = 0;
@@ -205,11 +205,12 @@ vector<vector<MotionVector>> fullSearchCUDANaiveGray(const ImageGray& curr, cons
                                             curr.width, curr.height, searchRange);
             break;
     }
-    gpuErrorCheck(cudaGetLastError());
     recordCudaEvent(evKStop);
     cout << "CUDA Naive (Grayscale): Kernel launched, synchronizing..." << endl;
-    gpuErrorCheck(cudaDeviceSynchronize());
+    gpuErrorCheck(cudaEventSynchronize(evKStop));
+    gpuErrorCheck(cudaGetLastError());
     
+    // kernel timing
     float kernelMilliseconds = elapsedCudaTime(evKStart, evKStop);
     CudaTimingUtils::printKernelTiming("CUDA Naive (Grayscale): Kernel timer:", kernelMilliseconds);
     
