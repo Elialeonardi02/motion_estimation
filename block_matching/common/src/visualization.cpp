@@ -154,6 +154,7 @@ void drawBlockIndices(ImageColor& img, int blockSize) {
 void drawBlockGridWithNumbers(ImageColor& img, int blockSize) {
     // First draw the grid (without numbers)
     drawBlockGridOnly(img, blockSize);
+    drawBlockIndices(img, blockSize);
 }
 
 // Draw motion vectors on grayscale image (converted to RGB)

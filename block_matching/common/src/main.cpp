@@ -237,7 +237,8 @@ int main(int argc, char* argv[]) {
                 // Save frame difference image
                 size_t last_dot = output_path.rfind('.');
                 string diff_path = output_path.substr(0, last_dot) + "_diff.ppm";
-                savePPM(drawFrameDifferenceRGB(ref_frame, curr_frame), diff_path);
+                ImageColor diff_img = drawFrameDifferenceRGB(ref_frame, curr_frame);
+                savePPM(drawFrameWithGridRGB(diff_img, blockSize), diff_path);
                 cout << "Frame difference saved in " << diff_path << endl;
                 
                 // Save reference frame with grid
@@ -280,7 +281,8 @@ int main(int argc, char* argv[]) {
                 // Save frame difference image
                 size_t last_dot = output_path.rfind('.');
                 string diff_path = output_path.substr(0, last_dot) + "_diff.ppm";
-                savePPM(drawFrameDifference(ref_frame, curr_frame), diff_path);
+                ImageColor diff_img = drawFrameDifference(ref_frame, curr_frame);
+                savePPM(drawFrameWithGridRGB(diff_img, blockSize), diff_path);
                 cout << "Frame difference saved in " << diff_path << endl;
                 
                 // Save reference frame with grid

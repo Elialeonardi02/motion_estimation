@@ -3,6 +3,7 @@
 
 #include <cuda_runtime.h>
 #include <cub/cub.cuh>
+#include <cooperative_groups.h>
 #include <iostream>
 #include <stdexcept>
 #include <string>

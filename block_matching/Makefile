@@ -9,7 +9,7 @@ INCLUDE_DIRS    = -Icommon/include \
                   -Isolutions/full_search/cpu_naive \
                   -Isolutions/full_search/cuda_naive \
                   -Isolutions/full_search/cuda_optimized \
-			      -Isolutions/full_search/cuda_uncoalesced_optimized \
+			      -Isolutions/full_search/cuda_optimized_uncoalesced \
 				  -Isolutions/logarithmic_search/include \
 				  -Isolutions/logarithmic_search/cpu_naive \
                   -Isolutions/logarithmic_search/cuda_optimized
@@ -19,7 +19,7 @@ COMMON_SRC      = common/src
 FSEARCH_CPU_SRC = solutions/full_search/cpu_naive
 FSEARCH_CUDA_SRC = solutions/full_search/cuda_naive
 FSEARCH_CUDA_OPTIMIZED_SRC = solutions/full_search/cuda_optimized
-FSEARCH_CUDA_UNCOALESCED_OPTIMIZED_SRC = solutions/full_search/cuda_uncoalesced_optimized
+FSEARCH_CUDA_OPTIMIZED_UNCOALESCED_SRC = solutions/full_search/cuda_optimized_uncoalesced
 LSEARCH_CPU_SRC = solutions/logarithmic_search/cpu_naive
 LSEARCH_CUDA_OPTIMIZED_SRC = solutions/logarithmic_search/cuda_optimized
 
@@ -49,7 +49,7 @@ LSEARCH_CPU_OBJECTS = $(BUILD_DIR)/logarithmicSearchBM_cpu_naive.o
 
 FSEARCH_CUDA_OBJECTS = $(BUILD_DIR)/fullSearchBM_cuda_naive.o \
 					   $(BUILD_DIR)/fullSearchBM_cuda_optimized.o \
-					   $(BUILD_DIR)/fullSearchBM_cuda_uncoalesced_optimized.o
+					   $(BUILD_DIR)/fullSearchBM_cuda_optimized_uncoalesced.o
 
 LSEARCH_CUDA_OBJECTS = $(BUILD_DIR)/logarithmicSearchBM_cuda_optimized.o
 
@@ -101,7 +101,7 @@ $(BUILD_DIR)/fullSearchBM_cuda_naive.o: $(FSEARCH_CUDA_SRC)/fullSearchBM_cuda_na
 $(BUILD_DIR)/fullSearchBM_cuda_optimized.o: $(FSEARCH_CUDA_OPTIMIZED_SRC)/fullSearchBM_cuda_optimized.cpp | $(BUILD_DIR)
 	$(NVXX) $(NVXXFLAGS) $(NVOPTFLAGS) $(INCLUDE_DIRS) $< -c -o $@
 
-$(BUILD_DIR)/fullSearchBM_cuda_uncoalesced_optimized.o: $(FSEARCH_CUDA_UNCOALESCED_OPTIMIZED_SRC)/fullSearchBM_cuda_uncoalesced_optimized.cpp | $(BUILD_DIR)
+$(BUILD_DIR)/fullSearchBM_cuda_optimized_uncoalesced.o: $(FSEARCH_CUDA_OPTIMIZED_UNCOALESCED_SRC)/fullSearchBM_cuda_optimized_uncoalesced.cpp | $(BUILD_DIR)
 	$(NVXX) $(NVXXFLAGS) $(NVOPTFLAGS) $(INCLUDE_DIRS) $< -c -o $@
 
 $(BUILD_DIR)/logarithmicSearchBM_cuda_optimized.o: $(LSEARCH_CUDA_OPTIMIZED_SRC)/logarithmicSearchBM_cuda_optimized.cpp | $(BUILD_DIR)

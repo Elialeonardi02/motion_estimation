@@ -13,23 +13,21 @@
 using namespace std;
 
 /* Device function to compute SAD between two blocks
- parameters:
-    -d_curr: pointer to current frame in GMEM.
-    -d_ref: pointer to reference frame in GMEM.
-    -curr_x, curry_y: top-left corner of the block in current frame in pixels.
-    -ref_x, ref_y: top-left corner of the block in reference frame in pixels.
-    -blockSize: size of the frame blocks.
-    -width, height: dimensions of the frames.
- return:
-    -sad value between the two blocks, or INT_MAX if any part of the block is out of frame bounds.
+    @param d_curr: pointer to current frame in GMEM.
+    @param d_ref: pointer to reference frame in GMEM.
+    @param curr_x, curr_y: top-left corner of the block in current frame in pixels.
+    @param ref_x, ref_y: top-left corner of the block in reference frame in pixels.
+    @param blockSize: size of the frame blocks.
+    @param width, height: dimensions of the frames.
+    @return int: sad value between the two blocks, or INT_MAX if any part of the block is out of frame bounds.
 */
 static __device__ __inline__ int computeSAD_device(const unsigned char* d_curr, const unsigned char* d_ref,
-                                int curr_x, int curry_y, int ref_x, int ref_y, int blockSize, int width, int height) {
+                                int curr_x, int curr_y, int ref_x, int ref_y, int blockSize, int width, int height) {
     int sad = 0;
     
     // loop over block rows
     for(int by = 0; by < blockSize; by++) { 
-        int cy = curry_y + by; // top-left corner of the block in current frame in pixels + block row offset
+        int cy = curr_y + by; // top-left corner of the block in current frame in pixels + block row offset
         int ry = ref_y + by; // top-left corner of the block in reference frame in pixels + block row offset
         if (cy >= height || ry >= height || cy < 0 || ry < 0) return INT_MAX; // overflow check: if we are beyond the height of the frame
         // loop over block columns
@@ -45,14 +43,13 @@ static __device__ __inline__ int computeSAD_device(const unsigned char* d_curr, 
 }
 
 /* CUDA kernel: performs full search block matching, each thread computes SAD for one candidate position in the search window, and finds the best match using block reduction
- parameters:
-    -d_curr: pointer to current frame in GMEM.
-    -d_ref: pointer to reference frame in GMEM.
-    -d_mv: pointer to final motion vectors in GMEM.
-    -blockSize: size of the frame blocks.
-    -width, height: dimensions of the frames.
-    -searchRange: range of the search window.
- threadsPerBlockDim: number of threads per cuda block dimension
+    @tparam threadsPerBlockDim: number of threads per cuda block dimension
+    @param d_curr: pointer to current frame in GMEM.
+    @param d_ref: pointer to reference frame in GMEM.
+    @param d_mv: pointer to final motion vectors in GMEM.
+    @param blockSize: size of the frame blocks.
+    @param width, height: dimensions of the frames.
+    @param searchRange: range of the search window.
 */
 template <int threadsPerBlockDim>
 __global__ void fullSearchNaiveKernel(const unsigned char* d_curr, const unsigned char* d_ref,
@@ -71,7 +68,7 @@ __global__ void fullSearchNaiveKernel(const unsigned char* d_curr, const unsigne
     CandidateSad local_best = {INT_MAX, 0, 0}; // initialize local best SAD to max and motion vector to (0,0)
     int  bestDist = INT_MAX; // for tie-breaking, initialize to max
     
-    // reduction1: Each thread computes SAD for its assigned candidate positions in the search window
+    // Each thread computes SAD for its assigned candidate positions in the search window (Reduction1)
     // total_threads < totalPosition, thread processes its assigned positions (i, i+total_threads, i+2*total_threads, ...)
     // total_threads = totalPosition, thread processes only one assigned position.
     for (int pos = tidx; pos < bounds.totalPositions; pos += total_threads) {
@@ -88,13 +85,13 @@ __global__ void fullSearchNaiveKernel(const unsigned char* d_curr, const unsigne
         int dist = dx *dx + dy * dy;// local best distance for tie-breaking
         if (sad < local_best.sad || (sad == local_best.sad && dist < bestDist)) { // update local best match
             local_best.sad = sad; 
-            local_best.dx = dx ; // local best dx
-            local_best.dy = dy; // local best dy
+            local_best.dx = dx ; 
+            local_best.dy = dy; 
             bestDist = dist;  
         }
     }
     
-    // reduction2: Block reduction to find the best match among all threads in the block
+    // Block reduction to find the best match among all threads in the block (reduction2)
     typedef cub::BlockReduce<CandidateSad, threadsPerBlockDim, cub::BLOCK_REDUCE_WARP_REDUCTIONS, threadsPerBlockDim> BlockReduceT;
     __shared__ typename BlockReduceT::TempStorage temp_storage;
     CandidateSad block_best = BlockReduceT(temp_storage).Reduce(local_best, MotionVectorUtils::CandidateSadOp());
@@ -106,14 +103,12 @@ __global__ void fullSearchNaiveKernel(const unsigned char* d_curr, const unsigne
 }
 
 /* Full search block matching implementation using CUDA naive approach for grayscale images
- parameters:
-    -curr: current frame in grayscale.
-    -ref: reference frame in grayscale.
-    -blockSize: size of the frame blocks.
-    -searchRange: range of the search window.
-    -metrics: struct to store timing metrics for this run.
- return:
-    -2D vector of motion vectors for each block in the current frame, where each motion vector represents the best match found in the reference frame within the search window
+    @param curr: current frame in grayscale.
+    @param ref: reference frame in grayscale.
+    @param blockSize: size of the frame blocks.
+    @param searchRange: range of the search window.
+    @param metrics: struct to store timing metrics for this function.
+    @return 2D vector of motion vectors for each block in the current frame, where each motion vector represents the best match found in the reference frame within the search window
 */
 vector<vector<MotionVector>> fullSearchCUDANaiveGray(const ImageGray& curr, const ImageGray& ref, 
                                                     int blockSize, int searchRange, SingleRunMetrics& metrics) {
@@ -122,13 +117,14 @@ vector<vector<MotionVector>> fullSearchCUDANaiveGray(const ImageGray& curr, cons
     
     // Create CUDA timer                                                 
     cudaEvent_t  evKStart, evKStop;
-    
     createCudaEvent(evKStart);
     createCudaEvent(evKStop);
+
     cudaSetDevice(0);
     
-    ValidationUtils::validateFrameDimensions(curr, ref);
+    
     // Calculate grid dimensions
+    ValidationUtils::validateFrameDimensions(curr, ref);
     int blocksX, blocksY;
     GridUtils::calculateGridDimensions(curr.width, curr.height, blockSize, blocksX, blocksY);
     
@@ -138,10 +134,11 @@ vector<vector<MotionVector>> fullSearchCUDANaiveGray(const ImageGray& curr, cons
     
     // Determine threads per block
     cudaDeviceProp prop;
+    cudaGetDeviceProperties(&prop, 0);
     int threadsPerBlockX; 
     int threadsPerBlockY;
     int threadsPerBlockDim = 1;  
-    cudaGetDeviceProperties(&prop, 0);
+    
     // searchRange > 0,  range search
     if (searchRange > 0) {
         // limit threads per block based on search range
@@ -149,13 +146,13 @@ vector<vector<MotionVector>> fullSearchCUDANaiveGray(const ImageGray& curr, cons
         threadsPerBlockX = min(blocksX, searchRange * 2 + 1); 
         threadsPerBlockY = min(blocksY, searchRange * 2 + 1); 
     }
-    else { // searchRange = 0, full search
+    else { // searchRange <= 0, full search
         threadsPerBlockX = blocksX;
         threadsPerBlockY = blocksY;
     }
     // Determine the largest power of two that is less than or equal to the minimum of threadsPerBlockX * threadsPerBlockY
-    int threadsPerBlockDimLimit = sqrt (min (threadsPerBlockX * threadsPerBlockY,  prop.maxThreadsPerBlock));
-    while (threadsPerBlockDim < threadsPerBlockDimLimit) {
+    int threadsPerBlockDimLimit = min(threadsPerBlockX * threadsPerBlockY, prop.maxThreadsPerBlock);
+    while ((threadsPerBlockDim << 1) * (threadsPerBlockDim << 1) <= threadsPerBlockDimLimit) {
         threadsPerBlockDim <<= 1;
     }
     // Allocate and copy GPU memory for frames
