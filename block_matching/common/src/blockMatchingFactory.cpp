@@ -9,6 +9,9 @@ std::vector<std::vector<MotionVector>> fullSearchCPUNaiveGray(const ImageGray& c
 std::vector<std::vector<MotionVector>> fullSearchCPUNaiveRGB(const ImageColor& curr, const ImageColor& ref,
                                                               int blockSize, int searchRange);
 
+std::vector<std::vector<MotionVector>> fullSearchCPUOpenMPGray(const ImageGray& curr, const ImageGray& ref,
+                                                              int blockSize, int searchRange, SingleRunMetrics& metrics);
+                                                              
 std::vector<std::vector<MotionVector>> logarithmicSearchCPUNaiveGray(const ImageGray& curr, const ImageGray& ref,
                                                                       int blockSize, int distance, SingleRunMetrics& metrics);
 
@@ -56,7 +59,14 @@ public:
         return fullSearchCPUNaiveRGB(curr, ref, blockSize, searchRange);
     }
 };
-
+class FullSearchBlockMatcherCPUOpenMP : public FullSearchBlockMatcherBase {
+public:
+    std::vector<std::vector<MotionVector>> matchGray(
+        const ImageGray& curr, const ImageGray& ref, int blockSize, SingleRunMetrics& metrics) override {
+        // Chiama la funzione corretta che abbiamo implementato
+        return fullSearchCPUOpenMPGray(curr, ref, blockSize, searchRange, metrics);
+    }
+};
 // FULL SEARCH - CUDA IMPLEMENTATIONS 
 #ifndef NO_CUDA
 
@@ -176,11 +186,13 @@ std::unique_ptr<BlockMatcher> createBlockMatcher(
     if (algorithm == "full_search") {
         if (implementation == "cpu_naive") {
             return std::make_unique<FullSearchBlockMatcherCPUNaive>();
+        } else if (implementation == "cpu_openmp") { // <--- AGGIUNGI QUESTE DUE RIGHE
+            return std::make_unique<FullSearchBlockMatcherCPUOpenMP>();
         } else if (implementation == "cuda_naive") {
             return std::make_unique<FullSearchBlockMatcherCUDANaive>();
         } else if (implementation == "cuda_optimized") {
             return std::make_unique<FullSearchBlockMatcherCUDAOptimized>();
-        } else if (implementation == "cuda_uncoalesced_optimized") {
+        } else if (implementation == "cuda_optimized_uncoalesced") {
             return std::make_unique<FullSearchBlockMatcherCUDAUncoalescedOptimized>();
         } else {
             throw std::runtime_error("Unknown implementation '" + implementation + 

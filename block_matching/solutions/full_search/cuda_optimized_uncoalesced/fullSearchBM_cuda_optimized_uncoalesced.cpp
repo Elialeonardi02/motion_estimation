@@ -13,16 +13,16 @@
 using namespace std;
 
 /* Reduces partial SAD values with cooperative groups warp-level reduction (reduction1)
-    @tparam size: hardware tile size in threads (must be a power of 2)
     @param warp: cooperative groups tile object (thread subgroup of cuda block).
     @param sad: partial SAD value computed by this specific thread.
     @param thread_group_size: size of the group collaborating on this SAD.
     @return int: the total reduced SAD value. Only the first thread of the group (thread rank 0) hold the correct final sum.
 */
-template <unsigned int size>
-__device__ int reduce_partial_sad_warp(cooperative_groups::thread_block_tile<size> warp, int sad, int thread_group_size) {
-    for (int offset = thread_group_size >> 1; offset > 0; offset >>=1) { 
-        sad += warp.shfl_down(sad, offset);
+__device__ __inline__ int reduce_partial_sad_warp(cooperative_groups::thread_block_tile<32> warp,
+                                        int sad, int thread_group_size) {
+    // each group of threads is compose of 32 (warp size)/ thread_group_size (blockDim.x) 
+    for (int offset = thread_group_size >> 1; offset > 0; offset >>= 1) {
+        sad += warp.shfl_down(sad, offset); // shuffle down to get the value from the thread offset away and add it to the current thread's value
     }
     return sad;
 }
@@ -33,11 +33,11 @@ __device__ int reduce_partial_sad_warp(cooperative_groups::thread_block_tile<siz
     @param candidate: the candidate motion vector and SAD value for this specific thread.
     @return CandidateSad: the best candidate after reduction. Only the first thread of the group (thread rank 0) hold the best candidate
 */
-template <unsigned int size>
-__device__ CandidateSad reduce_best_candidate_warp(cooperative_groups::thread_block_tile<size> warp, CandidateSad candidate) {
+__device__ CandidateSad reduce_best_candidate_warp(cooperative_groups::thread_block_tile<32> warp, CandidateSad candidate) {
+    int dist = candidate.dx * candidate.dx + candidate.dy * candidate.dy;
     for (int offset = warp.size() >> 1 ; offset > 0; offset >>= 1) {
         // current thread's candidate distance
-        int dist = candidate.dx * candidate.dx + candidate.dy * candidate.dy;
+        
         // other thread's candidate values
         int other_sad = warp.shfl_down(candidate.sad, offset); 
         int other_dx = warp.shfl_down(candidate.dx, offset);
@@ -48,6 +48,7 @@ __device__ CandidateSad reduce_best_candidate_warp(cooperative_groups::thread_bl
             candidate.sad = other_sad;
             candidate.dx = other_dx;
             candidate.dy = other_dy;
+            dist = other_dist;
         }
     }
     return candidate;
@@ -63,17 +64,18 @@ __device__ CandidateSad reduce_best_candidate_warp(cooperative_groups::thread_bl
     @param pixelsPerThread: number of pixels this thread should process for SAD computation.
     @return int: partial SAD value computed by this thread for its assigned pixels.
 */
-static __device__ int computeSAD_device_partial(const unsigned char* curr, const unsigned char* ref,
-                                                int ref_x, int ref_y, int blockSize, int refWidth,
+__device__ __inline__ int computeSAD_device_partial(const unsigned char* curr, const unsigned char* ref,
+                                                int ref_x, int ref_y, int blockSize, int width, 
                                                 int startPixel, int pixelsPerThread) {
     int sad = 0;
-    // loop over assigned pixels for this thread
     for (int pixelIdx = startPixel; pixelIdx < startPixel + pixelsPerThread; pixelIdx++) { 
-        if (pixelIdx >= blockSize * blockSize) break; // boundary check
+        if (pixelIdx >= blockSize * blockSize) break; // bound check
+
         // convert pixelIdx to 2D coordinates within the block
-        int y = pixelIdx / blockSize;
-        int x = pixelIdx % blockSize;
-        sad += abs(curr[pixelIdx] - ref[(ref_y + y) * refWidth + (ref_x + x)]);
+        int ry = ref_y + pixelIdx / blockSize;
+        int rx = ref_x + pixelIdx % blockSize;
+        
+        sad += abs((int)curr[pixelIdx] - (int)ref[ry * width + rx]);
     }
     return sad;
 }
@@ -90,12 +92,12 @@ and finds the best match using cooperative groups reduction (both reduction1 and
 */
 __global__ void fullSearchKernel(const unsigned char* d_curr, const unsigned char* d_ref,
                                  MotionVector* d_mv, int blockSize,
-                                 int width, int searchRange)  {
+                                 int width, int height, int searchRange)  {
     // cooperative groups setup and index
     // group thread idx: threadIdx.x
     // group thread size: blockDim.x
-    cooperative_groups :: thread_block block = cooperative_groups :: this_thread_block();
-    cooperative_groups :: thread_block_tile<32> warp = cooperative_groups :: tiled_partition<32>(block);
+    cooperative_groups :: thread_block block = cooperative_groups :: this_thread_block(); // entire block of threads, 
+    cooperative_groups :: thread_block_tile<32> warp = cooperative_groups :: tiled_partition<32>(block); // warp of 32 threads for reduction1 and reduction2
 
     // search window candidate position:
     // reference frame block y: threadIdx.y
@@ -105,7 +107,7 @@ __global__ void fullSearchKernel(const unsigned char* d_curr, const unsigned cha
     // Thread indices
     const int threadsYZ= blockDim.y * blockDim.z; // number of threads collaborating on different candidate positions for the same frame block
     const int tidx_yz= threadIdx.z * blockDim.y + threadIdx.y; // unique thread index along YZ dimensions, used to assign candidate positions 
-    //block.thread_rank(): tidx_3d = threadIdx.z * blockDim.y * blockDim.x + (threadIdx.y * blockDim.x) + threadIdx.x;
+    //block.thread_rank(): tidx_3d = threadIdx.z * blockDim.y * blockDim.x + (threadIdx.y * blockDim.x) + threadIdx.x; the cooperative groups blocks is the entire cuda
 
     // Current block top-left corner in pixels
     const int x = blockIdx.x * blockSize;
@@ -116,13 +118,14 @@ __global__ void fullSearchKernel(const unsigned char* d_curr, const unsigned cha
     
     // Thread-local best match
     CandidateSad local_best={INT_MAX, 0, 0};
-    
+    int best_dist = INT_MAX;    
     // Shared memory layout: current frame block + buffer for best candidates from each thread
     extern __shared__ unsigned char smem[];
     unsigned char* s_curr = smem;
     // align to avoid bank conflict
     size_t alignedCurrPixelBytes = (blockSize * blockSize * sizeof(unsigned char) + alignof(CandidateSad) - 1) & ~(alignof(CandidateSad) - 1);
     CandidateSad* best_thread_results = (CandidateSad*)(s_curr + alignedCurrPixelBytes);
+    CandidateSad* warp_results = best_thread_results + threadsYZ; // buffer for each warp to write their best candidate for reduction2
     
     // Load current frame block in shared memory by all threads in the block (blockDim.x * blockDim.y * blockDim.z)
     for (int i = block.thread_rank(); i < blockSize * blockSize; i += blockDim.x * blockDim.y * blockDim.z) {
@@ -136,9 +139,8 @@ __global__ void fullSearchKernel(const unsigned char* d_curr, const unsigned cha
     
     // Each thread (X,Y,Z) searches positions and computes partial SAD along X
     // threadsYZ < totalPosition, each YZ thread handles partial SAD for its assigned positions (i, i+threadsYZ, i+2*threadsYZ, ...)
-    // threadsYZ = totalPosition, each YZ thread compute partial SAD for only one assigned position.
-    const int totalIterations = (bounds.totalPositions + threadsYZ - 1) / threadsYZ;
-    for (int iter = 0; iter < totalIterations; iter++) {
+    // threadsYZ >= totalPosition, each YZ thread compute partial SAD for only one assigned position.
+    for (int iter = 0; iter < (bounds.totalPositions + threadsYZ - 1) / threadsYZ; iter++) {
         const int pos = iter * threadsYZ + tidx_yz; // global candidate position index for this thread to process
         const bool validPos = (pos < bounds.totalPositions);
         // Convert position to 2D frame block coordinates within search window
@@ -146,25 +148,25 @@ __global__ void fullSearchKernel(const unsigned char* d_curr, const unsigned cha
         int ref_by = validPos ? bounds.startY + (pos / bounds.width) : 0; // for invalid position, set to 0
         
         // Compute partial SAD for this thread
-        int partial_sad = validPos ? computeSAD_device_partial(
-            s_curr, d_ref, ref_bx * blockSize, ref_by * blockSize, blockSize, width,
+        int partial_sad = validPos ? computeSAD_device_partial(s_curr, d_ref,
+            ref_bx * blockSize, ref_by * blockSize, blockSize, width,
             threadIdx.x * pixelsPerThread, pixelsPerThread) : 0;
         
-        // reduction1: reduce partial SAD values from threads in X dimension to get total SAD for this candidate position
+        // reduce partial SAD values from threads in X dimension to get total SAD for this candidate position (reducion1)
         int total_sad = reduce_partial_sad_warp(warp, partial_sad, blockDim.x);
     
-        // 0YZ thread writes the total SAD and candidate motion vector to shared memory for reduction2
+        // 0YZ threads writes the total SAD and candidate motion vector to shared memory for reduction2
         if (threadIdx.x == 0 && validPos) {
             // motion vector components in block coordinates
             int ref_dx = ref_bx - blockIdx.x; 
             int ref_dy = ref_by - blockIdx.y;
             // tie-breaking using distance of motion vector
             int dist = ref_dx * ref_dx + ref_dy * ref_dy;
-            int best_dist = local_best.dx * local_best.dx + local_best.dy * local_best.dy;
             if (total_sad < local_best.sad || (total_sad == local_best.sad && dist < best_dist)) {
                 local_best.sad = total_sad;
                 local_best.dx = ref_dx;
                 local_best.dy = ref_dy;
+                best_dist = dist;
             }
         }
     } 
@@ -173,26 +175,40 @@ __global__ void fullSearchKernel(const unsigned char* d_curr, const unsigned cha
     }
     block.sync();
     
-    // reduction2: reduce SAD values between all candidates with 0YZ threads and find the best candidate
-    CandidateSad block_best = {INT_MAX, 0, 0};
-    int best_dist = INT_MAX;
-    
+   const int warp_id = block.thread_rank() / 32;
+   const int num_warps = (blockDim.x * blockDim.y * blockDim.z + 31) / 32; // round up to get total number of warps in the block
 
+    // reduce SAD values between all candidates with 0YZ threads and find the best candidate (reduction2)
+    CandidateSad warp_best = {INT_MAX, 0, 0};
+    best_dist = INT_MAX;
     // Each warp processes a portion of the best_thread_results buffer, 
-    // then the first warp reduces the best candidates from all warps to find the final best candidate
-    if (block.thread_rank()/32 == 0){ //warp_id == 0, only the thread of the warp 0 will perform the final reduction
-        for (int i = warp.thread_rank(); i < threadsYZ; i+=32){ // loop over candidates for this warp
-            CandidateSad candidate = best_thread_results[i]; 
-            int dist = candidate.dx * candidate.dx + candidate.dy * candidate.dy;
-            if (candidate.sad < block_best.sad || (candidate.sad == block_best.sad && dist < best_dist)) {
-                block_best = candidate;
-                best_dist = dist;
-            }
+    for (int i = warp_id * 32 + warp.thread_rank(); i < threadsYZ; i += num_warps * 32) {
+        CandidateSad candidate = best_thread_results[i];
+        int dist = candidate.dx * candidate.dx + candidate.dy * candidate.dy;
+        int warp_dist = warp_best.dx  * warp_best.dx  + warp_best.dy  * warp_best.dy;
+        if (candidate.sad < warp_best.sad ||
+        (candidate.sad == warp_best.sad && dist < best_dist)) {
+            warp_best = candidate;
+            best_dist = dist;
+        }
+    }
+    warp_best = reduce_best_candidate_warp(warp, warp_best);
+    if (warp.thread_rank() == 0) {
+        warp_results[warp_id] = warp_best;
+    }
+    block.sync();
+    
+    // Final reduction among warp leaders to find the best candidate for the block
+    CandidateSad block_best = {INT_MAX, 0, 0};
+    if (warp_id == 0) {
+        if (warp.thread_rank() < num_warps) {
+            block_best = warp_results[warp.thread_rank()];
         }
         block_best = reduce_best_candidate_warp(warp, block_best);
     }
-    // The first thread writes the best motion vector for this current frame block to GMEM
-    if (block.thread_rank() == 0){
+    
+
+    if (block.thread_rank() == 0) {
         d_mv[blockIdx.y * gridDim.x + blockIdx.x] = {block_best.dx, block_best.dy};
     }
 }
@@ -215,6 +231,8 @@ __global__ void fullSearchKernel(const unsigned char* d_curr, const unsigned cha
     createCudaEvent(evKStop);
 
     cudaSetDevice(0);
+    cudaDeviceProp prop;
+    cudaGetDeviceProperties(&prop, 0);
     
     // Calculate grid dimensions
     ValidationUtils::validateFrameDimensions(curr, ref);
@@ -226,22 +244,26 @@ __global__ void fullSearchKernel(const unsigned char* d_curr, const unsigned cha
     LoggingUtils::printSearchModeInfo("CUDA Uncoalesced Optimized", searchRange);
     
     // Determine threads per block
-    cudaDeviceProp prop;
-    cudaGetDeviceProperties(&prop, 0);
-    int threadsPerBlockX = 1; // X dimension is used for parallelizing SAD computation 
+    
+    int threadsPerBlockX = 2; // X dimension is used for parallelizing SAD computation 
     int threadsPerBlockY = blocksX; // Y dimension is used for candidate positions along width of search window
     int threadsPerBlockZ = blocksY; // Z dimension is used for candidate positions along height of search window
     if (searchRange > 0) {
-        threadsPerBlockY = min(blocksX, searchRange * 2 + 1);
+        threadsPerBlockY = min(blocksX,searchRange * 2 + 1);
         threadsPerBlockZ = min(blocksY, searchRange * 2 + 1);
     } 
-    if (threadsPerBlockY * threadsPerBlockZ <=prop.maxThreadsPerBlock){
+    // 
+    threadsPerBlockY = (threadsPerBlockY + 3) & ~3;
+    threadsPerBlockZ = (threadsPerBlockZ + 3) & ~3;
+    if (threadsPerBlockX * threadsPerBlockY * threadsPerBlockZ <= prop.maxThreadsPerBlock) {
+        
         int maxThreadsPerPartialSad = min(32, prop.maxThreadsPerBlock / (threadsPerBlockY * threadsPerBlockZ));
-        // Determine the largest power of two for threads in X dimension to parallelize SAD computation
         while (threadsPerBlockX << 1 <= maxThreadsPerPartialSad) {
             threadsPerBlockX <<= 1;
         }
-    }else{ // trashold configuration that exceeds max threads per block
+        
+    } else { 
+        // Fallback di sicurezza: se la finestra è enorme, torniamo a una griglia fissa
         threadsPerBlockX = 4; 
         threadsPerBlockY = 16;
         threadsPerBlockZ = 16;
@@ -263,7 +285,9 @@ __global__ void fullSearchKernel(const unsigned char* d_curr, const unsigned cha
     
     // SMEM size: current block + buffer for best candidates from each thread
     size_t alignedCurrPixelBytes = (blockSize * blockSize * sizeof(unsigned char) + alignof(CandidateSad) - 1) & ~(alignof(CandidateSad) - 1);
-    size_t sharedMemSize = alignedCurrPixelBytes + (threadsPerBlockY * threadsPerBlockZ) * sizeof(CandidateSad);
+    size_t sharedMemSize = alignedCurrPixelBytes 
+                            + (threadsPerBlockY * threadsPerBlockZ) * sizeof(CandidateSad) // buffer for each thread to write their best candidate for reduction2
+                            + ((threadsPerBlock + 31) / 32) * sizeof(CandidateSad); // buffer for each warp to write their best candidate for reduction2
     cout << "CUDA Uncoalesced Optimized (Grayscale): Shared memory per block: " << sharedMemSize / 1024.0f << " KB" << endl;
     
     // Launch CUDA kernel
@@ -275,7 +299,7 @@ __global__ void fullSearchKernel(const unsigned char* d_curr, const unsigned cha
     
     recordCudaEvent(evKStart);
     fullSearchKernel<<<gridDim, blockDim, sharedMemSize>>>(d_curr, d_ref, d_mv, blockSize,
-                                            curr.width, searchRange);
+                                            curr.width, curr.height, searchRange);
     recordCudaEvent(evKStop);
     cout << "CUDA Uncoalesced Optimized (Grayscale): Kernel launched, synchronizing..." << endl;
     gpuErrorCheck(cudaEventSynchronize(evKStop));
@@ -291,7 +315,7 @@ __global__ void fullSearchKernel(const unsigned char* d_curr, const unsigned cha
     
     // Convert flat array to 2D vector
     vector<vector<MotionVector>> result = GridUtils::flatTo2DVector(h_mv, blocksX, blocksY);
-    
+     
     // Cleanup
     LoggingUtils::printCleanupGPU("CUDA Uncoalesced Optimized");
     GPUMemoryUtils::freeMemory(d_curr, d_ref, d_mv);

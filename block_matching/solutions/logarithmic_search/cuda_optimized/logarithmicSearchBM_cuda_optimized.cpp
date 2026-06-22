@@ -211,13 +211,13 @@ void launchSADKernel(
         case 256:  dispatchKernel.template operator()<256>(); break;
         case 512:  dispatchKernel.template operator()<512>(); break;
         case 1024: dispatchKernel.template operator()<1024>(); break;
-        default:   throw std::runtime_error("exceeded number of threads per block: " + std::to_string(threadsKSad));
+        default:   throw runtime_error("exceeded number of threads per block: " + to_string(threadsKSad));
     }
 }
 // HOST CODE
 vector<vector<MotionVector>> logarithmicSearchCUDAOptimizedGray(const ImageGray& curr, const ImageGray& ref, 
                                                          int blockSize, int searchDistance, SingleRunMetrics& metrics) {
-    auto total_time_start = std::chrono::high_resolution_clock::now();
+    auto total_time_start = chrono::high_resolution_clock::now();
     
     // CUDA timing events
     cudaEvent_t evKSADStart, evKSADStop;
@@ -364,8 +364,8 @@ vector<vector<MotionVector>> logarithmicSearchCUDAOptimizedGray(const ImageGray&
     vector<vector<MotionVector>> result = GridUtils::flatTo2DVector(h_mv_flat, blocksX, blocksY);
 
     // Stop total timer after cleanup
-    auto total_time_stop = std::chrono::high_resolution_clock::now();
-    float total_time = std::chrono::duration<float, std::milli>(total_time_stop - total_time_start).count();
+    auto total_time_stop = chrono::high_resolution_clock::now();
+    float total_time = chrono::duration<float, milli>(total_time_stop - total_time_start).count();
     metrics.total_ms = total_time;
     metrics.gpu_kernel1_ms = msKSAD;
 

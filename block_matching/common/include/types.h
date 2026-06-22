@@ -14,7 +14,7 @@ struct alignas(16) CandidateSad {
     int sad;
     int dx;
     int dy;
-}; // 12 bytes are not aligned to 16 bytes, packed to avoid padding, but may cause unaligned access on some architectures
+}; // 12 bytes are not aligned to 16 bytes, packed to avoid padding
 
 
 // Grayscale image structure

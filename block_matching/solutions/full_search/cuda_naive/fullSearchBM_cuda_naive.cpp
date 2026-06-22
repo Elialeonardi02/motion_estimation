@@ -54,7 +54,7 @@ static __device__ __inline__ int computeSAD_device(const unsigned char* d_curr, 
 template <int threadsPerBlockDim>
 __global__ void fullSearchNaiveKernel(const unsigned char* d_curr, const unsigned char* d_ref,
                                 MotionVector* d_mv, int blockSize, int width, int height, int searchRange)  {
-    // Grid and thread indices
+    // Grid and thread indexes
     int tidx = threadIdx.y * blockDim.x + threadIdx.x;
     int constexpr total_threads = threadsPerBlockDim * threadsPerBlockDim; // total threads per block
     
@@ -70,7 +70,7 @@ __global__ void fullSearchNaiveKernel(const unsigned char* d_curr, const unsigne
     
     // Each thread computes SAD for its assigned candidate positions in the search window (Reduction1)
     // total_threads < totalPosition, thread processes its assigned positions (i, i+total_threads, i+2*total_threads, ...)
-    // total_threads = totalPosition, thread processes only one assigned position.
+    // total_threads >= totalPosition, thread processes only one assigned position.
     for (int pos = tidx; pos < bounds.totalPositions; pos += total_threads) {
         // Convert position to 2D coordinates within search window
         int ref_bx = bounds.startX + (pos % bounds.width); // candidate block top-left corner in reference frame in block coordinates
@@ -92,9 +92,9 @@ __global__ void fullSearchNaiveKernel(const unsigned char* d_curr, const unsigne
     }
     
     // Block reduction to find the best match among all threads in the block (reduction2)
-    typedef cub::BlockReduce<CandidateSad, threadsPerBlockDim, cub::BLOCK_REDUCE_WARP_REDUCTIONS, threadsPerBlockDim> BlockReduceT;
-    __shared__ typename BlockReduceT::TempStorage temp_storage;
-    CandidateSad block_best = BlockReduceT(temp_storage).Reduce(local_best, MotionVectorUtils::CandidateSadOp());
+    typedef cub::BlockReduce<CandidateSad, threadsPerBlockDim, cub::BLOCK_REDUCE_WARP_REDUCTIONS, threadsPerBlockDim> blockReduceT;
+    __shared__ typename blockReduceT::TempStorage temp_storage;
+    CandidateSad block_best = blockReduceT(temp_storage).Reduce(local_best, MotionVectorUtils::CandidateSadOp());
     
     // Write the best motion vector for this current frame block to gmem
     if (tidx == 0){
@@ -121,7 +121,6 @@ vector<vector<MotionVector>> fullSearchCUDANaiveGray(const ImageGray& curr, cons
     createCudaEvent(evKStop);
 
     cudaSetDevice(0);
-    
     
     // Calculate grid dimensions
     ValidationUtils::validateFrameDimensions(curr, ref);
