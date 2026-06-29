@@ -183,10 +183,10 @@ std::unique_ptr<BlockMatcher> createBlockMatcher(
     const std::string& algorithm, 
     const std::string& implementation) {
     
-    if (algorithm == "full_search") {
+    if (algorithm == "full_search" || algorithm == "range_search") {
         if (implementation == "cpu_naive") {
             return std::make_unique<FullSearchBlockMatcherCPUNaive>();
-        } else if (implementation == "cpu_openmp") { // <--- AGGIUNGI QUESTE DUE RIGHE
+        } else if (implementation == "cpu_openmp") { 
             return std::make_unique<FullSearchBlockMatcherCPUOpenMP>();
         } else if (implementation == "cuda_naive") {
             return std::make_unique<FullSearchBlockMatcherCUDANaive>();

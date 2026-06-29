@@ -75,7 +75,7 @@ __device__ __inline__ int computeSAD_device_partial(const unsigned char* curr, c
         int ry = ref_y + pixelIdx / blockSize;
         int rx = ref_x + pixelIdx % blockSize;
         
-        sad += abs((int)curr[pixelIdx] - (int)ref[ry * width + rx]);
+        sad = __usad(curr[pixelIdx], ref[ry * width + rx], sad);
     }
     return sad;
 }
@@ -122,7 +122,7 @@ __global__ void fullSearchKernel(const unsigned char* d_curr, const unsigned cha
     // Shared memory layout: current frame block + buffer for best candidates from each thread
     extern __shared__ unsigned char smem[];
     unsigned char* s_curr = smem;
-    // align to avoid bank conflict
+    // align to avoid misaligned access for CandidateSad struct
     size_t alignedCurrPixelBytes = (blockSize * blockSize * sizeof(unsigned char) + alignof(CandidateSad) - 1) & ~(alignof(CandidateSad) - 1);
     CandidateSad* best_thread_results = (CandidateSad*)(s_curr + alignedCurrPixelBytes);
     CandidateSad* warp_results = best_thread_results + threadsYZ; // buffer for each warp to write their best candidate for reduction2
@@ -312,9 +312,6 @@ __global__ void fullSearchKernel(const unsigned char* d_curr, const unsigned cha
     // Copy results back to host
     vector<MotionVector> h_mv(blocksX * blocksY);
     GPUMemoryUtils::copyMotionVectorsFromGPU(h_mv, d_mv, blocksX, blocksY);
-    
-    // Convert flat array to 2D vector
-    vector<vector<MotionVector>> result = GridUtils::flatTo2DVector(h_mv, blocksX, blocksY);
      
     // Cleanup
     LoggingUtils::printCleanupGPU("CUDA Uncoalesced Optimized");
@@ -328,6 +325,9 @@ __global__ void fullSearchKernel(const unsigned char* d_curr, const unsigned cha
     destroyCudaEvent(evKStart);
     destroyCudaEvent(evKStop);
     
+    // Convert flat array to 2D vector
+    vector<vector<MotionVector>> result = GridUtils::flatTo2DVector(h_mv, blocksX, blocksY);
+
     LoggingUtils::printProcessingComplete("CUDA Uncoalesced Optimized");
     return result;
 }

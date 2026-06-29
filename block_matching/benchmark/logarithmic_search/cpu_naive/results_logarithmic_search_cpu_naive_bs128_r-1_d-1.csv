@@ -1,0 +1,7 @@
+name,avg_total_time,min_total_time,max_total_time,MQE_total_time,avg_k1_time,min_k1_time,max_k1_time,MQE_k1_time,avg_k2_time,min_k2_time,max_k2_time,MQE_k2_time
+diagonal_1024x1024,13.59,13.58,13.62,0.25,0.0,inf,0,1.0,0.0,inf,0,1.0
+diagonal_2048x2048,88.344,87.77,89.41,0.3499999999999987,0.0,inf,0,1.0,0.0,inf,0,1.0
+diagonal_256x256,0.278,0.27,0.28,0.8,0.0,inf,0,1.0,0.0,inf,0,1.0
+diagonal_4096x4096,626.5160000000001,626.32,626.85,0.3698113207547858,0.0,inf,0,1.0,0.0,inf,0,1.0
+diagonal_512x512,2.06,2.04,2.08,0.5,0.0,inf,0,1.0,0.0,inf,0,1.0
+diagonal_8192x8192,3528.1980000000003,3497.08,3610.23,0.2750154661953192,0.0,inf,0,1.0,0.0,inf,0,1.0

@@ -8,20 +8,30 @@
 
 using namespace std;
 
-// Logarithmic search block matching for grayscale images
+/* CPU naive logarithmic search for grayscale images
+    without specify searchDistance, is computed as max(blocksX, blocksY)-1, which is the maximum distance to cover the entire frame
+    @param curr: current frame
+    @param ref: reference frame
+    @param blockSize: size of the block (in pixels)
+    @param searchDistance: maximum search distance (in blocks)
+    @param metrics: structure to hold timing metrics for the entire block matching process and individual kernels
+    @return: 2D vector of motion vectors for each block in the current frame
+*/
 vector<vector<MotionVector>> logarithmicSearchCPUNaiveGray(const ImageGray& curr, const ImageGray& ref,
-                                                           int blockSize, int distance, SingleRunMetrics& metrics) {
+                                                           int blockSize, int searchDistance, SingleRunMetrics& metrics) {
     auto start_time = chrono::high_resolution_clock::now();
     // Grid of blocks
     int blocksX, blocksY;
     GridUtils::calculateGridDimensions(curr.width, curr.height, blockSize, blocksX, blocksY);
     vector<vector<MotionVector>> mv = GridUtils::createMotionVectorGrid(blocksX, blocksY);
-
-    
+    // logarith search all over the  frame
+    if (searchDistance < 0) {
+        searchDistance = max(blocksX, blocksY)-1;
+    }                                        
     
     LoggingUtils::printFrameInfo("CPU Naive Logarithmic", curr.width, curr.height, blockSize, blocksX, blocksY);
     cout << "CPU Naive Logarithmic (Grayscale): Search strategy: Logarithmic search (distance="
-        << distance << " blocks)" << endl;
+        << searchDistance << " blocks)" << endl;
 
     for(int bx = 0; bx < blocksX; bx++) {
         for(int by = 0; by < blocksY; by++) {
@@ -33,8 +43,9 @@ vector<vector<MotionVector>> logarithmicSearchCPUNaiveGray(const ImageGray& curr
             int cy = by; 
             int bestCx = cx;
             int bestCy = cy;
-            // Logarithmic search: start with the initial distance and keep halving it until it becomes 1
-            for (int currentDistance = distance; currentDistance > 0; currentDistance /= 2) {
+            // Logarithmic search: start with the initial distance
+            //RAW loop-carried dependency
+            for (int currentDistance = searchDistance; currentDistance > 0; currentDistance >>= 1) {
                 // Check the 8 points around the block in the current frame at the current distance 
                 // plus the center point (0,0) which is the current block position in the reference frame
                 // (-d,d), (0,d), (d,d), 
@@ -68,7 +79,7 @@ vector<vector<MotionVector>> logarithmicSearchCPUNaiveGray(const ImageGray& curr
                 cy = bestCy;
             }
             
-            mv[by][bx] = {bestCx - bx, bestCy - by};
+            mv[bx][by] = {bestCx - bx, bestCy - by};
         }
         
         // Progress every 10 columns

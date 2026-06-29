@@ -38,64 +38,67 @@ __global__ void computeSADKernel(
     const unsigned char* __restrict__ d_ref,
     int* d_sad, int blockSize, int width, int searchRange, int maxCandidates) 
 {   
+    // Calculate search window bounds for the current block
     CudaSearchBounds bounds = calculateCudaSearchBounds(blockIdx.x, blockIdx.y, gridDim.x, gridDim.y, searchRange);
-    const int total_pixels = blockSize * blockSize;
+    const int pixelsPerBlock = blockSize * blockSize; // pixels in a frame block
+    // Calculate the top-left corner of the current block in pixels
     const int x = blockIdx.x * blockSize; 
     const int y = blockIdx.y * blockSize;
 
+    // BlockReduce from CUB library for parallel reduction of partial SAD values computed by threads in the block
     using BlockReduce = cub::BlockReduce<int, KSAD_THREADS>;
     __shared__ typename BlockReduce::TempStorage partial_sad_reduce_storage;
 
-    extern __shared__ unsigned char smemSad[];
-    unsigned char* s_curr = (STRATEGY != SmemStrategy::NONE) ? smemSad : nullptr;
-    unsigned char* s_ref = (STRATEGY == SmemStrategy::FULL) ? smemSad + total_pixels : nullptr;
+    // SMEM layout: use SMEM based on the selected strategy
+    extern __shared__ unsigned char smemKSad[];
+    unsigned char* s_curr = (STRATEGY != SmemStrategy::NONE) ? smemKSad : nullptr;
+    unsigned char* s_ref = (STRATEGY == SmemStrategy::FULL) ? smemKSad + pixelsPerBlock : nullptr;
 
+    // load current frame block in SMEM if strategy is FULL or CURR_ONLY
     if constexpr (STRATEGY != SmemStrategy::NONE) {
-        for (int i = threadIdx.x; i < total_pixels; i += KSAD_THREADS) {
-            int row = i / blockSize;
-            int col = i % blockSize;
-            s_curr[i] = d_curr[(y + row) * width + (x + col)];
+        for (int i = threadIdx.x; i < pixelsPerBlock; i += KSAD_THREADS) {
+            s_curr[i] = d_curr[(y + (i / blockSize)) * width + (x + (i % blockSize))];
         }
         __syncthreads();
     }
-
+    // Each thread computes a portion of the SAD for its assigned candidate positions in the search window
+    // blockDim.z >= totalPositions, each thread computes partial SAD for only one assigned position.
+    // blockDim.z < totalPositions, each thread computes partial SAD for its assigned positions (i, i+blockDim.z, i+2*blockDim.z, ...)
     for (int flat_idx = blockIdx.z; flat_idx < bounds.totalPositions; flat_idx += gridDim.z) {
+        // flat to 2D conversion to get candidate block's top-left corner in reference frame in pixels
         const int ref_x = (bounds.startX + (flat_idx % bounds.width)) * blockSize;   
         const int ref_y = (bounds.startY + (flat_idx / bounds.width)) * blockSize;
 
+        // load also reference frame block in SMEM if strategy is FULL
         if constexpr (STRATEGY == SmemStrategy::FULL) {
-            for (int i = threadIdx.x; i < total_pixels; i += KSAD_THREADS) {
-                int row = i / blockSize;
-                int col = i % blockSize;
-                s_ref[i] = d_ref[(ref_y + row) * width + (ref_x + col)];
+            for (int i = threadIdx.x; i < pixelsPerBlock; i += KSAD_THREADS) {
+                s_ref[i] = d_ref[(ref_y + (i / blockSize)) * width + (ref_x + (i % blockSize))];
             }
             __syncthreads();
         }
 
         int partial_sad = 0; 
-        
-        for (int i = threadIdx.x; i < total_pixels; i += KSAD_THREADS) {
+        // Each thread computes partial SAD for its assigned pixels in the block
+        for (int i = threadIdx.x; i < pixelsPerBlock; i += KSAD_THREADS) {
             unsigned char c, r;
-            
             if constexpr (STRATEGY == SmemStrategy::FULL) {
                 c = s_curr[i];
                 r = s_ref[i];
             } else if constexpr (STRATEGY == SmemStrategy::CURR_ONLY) {
                 c = s_curr[i];
-                int row = i / blockSize;
-                int col = i % blockSize;
-                r = d_ref[(ref_y + row) * width + (ref_x + col)];
-            } else { // NONE
+                r = d_ref[(ref_y + ( i / blockSize)) * width + (ref_x + (i % blockSize))];
+            } else {
                 int row = i / blockSize;
                 int col = i % blockSize;
                 c = d_curr[(y + row) * width + (x + col)];
                 r = d_ref[(ref_y + row) * width + (ref_x + col)];
             }
             
-            partial_sad += abs((int)c - (int)r);
+            partial_sad = __usad(c, r, partial_sad);
         }
-
+        // reduce partial SAD values from threads in the block to get total SAD for this candidate position
         const int total_sad = BlockReduce(partial_sad_reduce_storage).Sum(partial_sad);
+
 
         if (threadIdx.x == 0) { 
             d_sad[(blockIdx.y * gridDim.x + blockIdx.x) * maxCandidates + flat_idx] = total_sad; 
@@ -335,7 +338,9 @@ vector<vector<MotionVector>> fullSearchCUDAOptimizedGray(const ImageGray& curr, 
     MotionVector* d_mv = nullptr;
     gpuErrorCheck(cudaMalloc(&d_sad, sadBytes));
     gpuErrorCheck(cudaMalloc(&d_mv, (size_t)blocksX * blocksY * sizeof(MotionVector)));
-    
+    cout << "CUDA Optimized (Grayscale): Allocating d_sad buffer of size " << sadBytes / (1024.0 * 1024.0) << " MB..." << endl;
+    cout << "CUDA Optimized (Grayscale): Allocating d_mv buffer of size " << ((size_t)blocksX * blocksY * sizeof(MotionVector)) / (1024.0 * 1024.0) << " MB..." << endl;
+
     // Grid and block dimensions
     const dim3 gridKSad(blocksX, blocksY, KSADgridZ);
     const dim3 gridKBestMV(blocksX, blocksY);
@@ -355,6 +360,7 @@ vector<vector<MotionVector>> fullSearchCUDAOptimizedGray(const ImageGray& curr, 
     cout << "CUDA Optimized (Grayscale): Selected threads for KSad: " <<  threadsKSad
                << " and block "<< blocksX << "x" << blocksY
                << " (K1=" << smKSad/1024.0 << "KB, K2=" << "no SMEM "<<"\n\n";
+    
     cout << "CUDA Optimized (Grayscale): Selected threads for findBestMV: " << threadsKBestMV
          << " and block "<< blocksX << "x" << blocksY << "\n\n";
     
@@ -370,8 +376,9 @@ vector<vector<MotionVector>> fullSearchCUDAOptimizedGray(const ImageGray& curr, 
 
     
     // launch findBestMVKernel
-    cout << "CUDA Optimized (Grayscale): Launching findBestMVKernel with "
-        << blockDimKBestMV.x << "x" << blockDimKBestMV.y << "x" << blockDimKBestMV.z
+    cout << "CUDA Optimized (Grayscale): Launching findBestMVKernel with " << 
+        " blocks " << gridKBestMV.x << "x" << gridKBestMV.y << "x" << gridKBestMV.z
+        << " and " << blockDimKBestMV.x << "x" << blockDimKBestMV.y << "x" << blockDimKBestMV.z
         << " threads per block (" << threadsKBestMV << " total threads)..." << endl;
     recordCudaEvent(evKBestMVStart);
     switch (threadsKBestMV) {
@@ -430,9 +437,6 @@ vector<vector<MotionVector>> fullSearchCUDAOptimizedGray(const ImageGray& curr, 
     vector<MotionVector> h_mv_flat(blocksX * blocksY);
     GPUMemoryUtils::copyMotionVectorsFromGPU(h_mv_flat, d_mv, blocksX, blocksY);
 
-    // Convert flat array to 2D vector
-    vector<vector<MotionVector>> result = GridUtils::flatTo2DVector(h_mv_flat, blocksX, blocksY);
-
     // Cleanup GPU
     LoggingUtils::printCleanupGPU("CUDA Optimized");
     GPUMemoryUtils::freeMemory(d_curr, d_ref, d_sad, d_mv);
@@ -448,5 +452,9 @@ vector<vector<MotionVector>> fullSearchCUDAOptimizedGray(const ImageGray& curr, 
     destroyCudaEvent(evKBestMVStart); destroyCudaEvent(evKBestMVStop);
 
     LoggingUtils::printProcessingComplete("CUDA Optimized");
+    
+    // Convert flat array to 2D vector
+    vector<vector<MotionVector>> result = GridUtils::flatTo2DVector(h_mv_flat, blocksX, blocksY);
+
     return result;
 }

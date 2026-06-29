@@ -10,11 +10,11 @@ struct MotionVector {
 };
 
 // CandidateSad structure, holding SAD value and corresponding motion vector for a candidate block
-struct alignas(16) CandidateSad {
+struct CandidateSad {
     int sad;
     int dx;
     int dy;
-}; // 12 bytes are not aligned to 16 bytes, packed to avoid padding
+}; 
 
 
 // Grayscale image structure

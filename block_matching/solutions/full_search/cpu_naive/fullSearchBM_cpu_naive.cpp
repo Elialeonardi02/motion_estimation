@@ -9,7 +9,15 @@
 
 using namespace std;
 
-// Full Search Block Matching for grayscale images
+/* Full Search Block Matching for grayscale images using CPU naive implementation
+    @param curr: current frame in grayscale.
+    @param ref: reference frame in grayscale.
+    @param blockSize: size of the blocks for motion estimation.
+    @param searchRange: search range in block,
+    @param metrics: reference to SingleRunMetrics struct to store timing metrics for this function
+    @return 2D vector of MotionVector objects representing the motion vector for each block in the current frame
+
+*/
 vector<vector<MotionVector>> fullSearchCPUNaiveGray(const ImageGray& curr, const ImageGray& ref,
                                                      int blockSize, int searchRange, SingleRunMetrics& metrics) {
     int blocksX, blocksY;
@@ -64,7 +72,14 @@ vector<vector<MotionVector>> fullSearchCPUNaiveGray(const ImageGray& curr, const
     return mv;
 }
 
-// Full Search Block Matching for RGB color images
+/* Full Search Block Matching for RGB images using CPU naive implementation
+    @param curr: current frame in RGB.
+    @param ref: reference frame in RGB.
+    @param blockSize: size of the blocks for motion estimation.
+    @param searchRange: search range in block.
+    @return 2D vector of MotionVector objects representing the motion vector for each block in the current frame.
+
+*/
 vector<vector<MotionVector>> fullSearchCPUNaiveRGB(const ImageColor& curr, const ImageColor& ref,
                                                     int blockSize, int searchRange) {
     int blocksX, blocksY;

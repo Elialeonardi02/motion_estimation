@@ -36,7 +36,7 @@ static __device__ __inline__ int computeSAD_device(const unsigned char* d_curr, 
             int rx = ref_x + bx; // top-left corner of the block in reference frame in pixels + block column offset
             if (cx >= width || rx >= width || cx < 0 || rx < 0) return INT_MAX; // overflow check: if we are beyond the width of the frame
             // compute and accumulate SAD
-            sad += abs((int)d_curr[cy * width + cx] - (int)d_ref[ry * width + rx]);
+            sad = __usad(d_curr[cy * width + cx], d_ref[ry * width + rx], sad);
         }
     }
     return sad;
@@ -214,9 +214,6 @@ vector<vector<MotionVector>> fullSearchCUDANaiveGray(const ImageGray& curr, cons
     vector<MotionVector> h_mv(blocksX * blocksY);
     GPUMemoryUtils::copyMotionVectorsFromGPU(h_mv, d_mv, blocksX, blocksY);
     
-    // Convert flat array to 2D vector
-    vector<vector<MotionVector>> result = GridUtils::flatTo2DVector(h_mv, blocksX, blocksY);
-    
     // Cleanup
     LoggingUtils::printCleanupGPU("CUDA Naive");
     GPUMemoryUtils::freeMemory(d_curr, d_ref, d_mv);
@@ -229,6 +226,9 @@ vector<vector<MotionVector>> fullSearchCUDANaiveGray(const ImageGray& curr, cons
     destroyCudaEvent(evKStart);
     destroyCudaEvent(evKStop);
     
+    // Convert flat array to 2D vector
+    vector<vector<MotionVector>> result = GridUtils::flatTo2DVector(h_mv, blocksX, blocksY);
+
     LoggingUtils::printProcessingComplete("CUDA Naive");
     return result;
 }
