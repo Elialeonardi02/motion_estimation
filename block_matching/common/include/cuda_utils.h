@@ -3,6 +3,7 @@
 
 #include <cuda_runtime.h>
 #include <cub/cub.cuh>
+#include <cooperative_groups.h>
 #include <iostream>
 #include <stdexcept>
 #include <string>
@@ -21,8 +22,8 @@ struct CudaSearchBounds {
 
 // Device function to calculate search bounds in CUDA kernels
 __device__ inline CudaSearchBounds calculateCudaSearchBounds(int blockIdxX, int blockIdxY, 
-                                                              int gridDimX, int gridDimY, 
-                                                              int searchRange) {
+                                                             int gridDimX, int gridDimY, 
+                                                             int searchRange) {
   CudaSearchBounds bounds;
   
   if (searchRange > 0) {
@@ -42,6 +43,24 @@ __device__ inline CudaSearchBounds calculateCudaSearchBounds(int blockIdxX, int 
   bounds.totalPositions = bounds.width * bounds.height;
   
   return bounds;
+}
+
+namespace MotionVectorUtils {
+  struct CandidateSadOp {
+      __device__ __forceinline__
+      CandidateSad operator()(const CandidateSad& a, const CandidateSad& b) const {
+          if (a.sad != b.sad) return a.sad < b.sad ? a : b;
+          
+          // tie-break: prefer shorter motion vector
+          int distA = (a.dx * a.dx) + (a.dy * a.dy);
+          int distB = (b.dx * b.dx) + (b.dy * b.dy);
+          if (distA != distB) return distA < distB ? a : b;
+          
+          // deterministic tie-break: if SAD and distance are the same, prefer candidate with smaller dx, then smaller dy 
+          if (a.dy != b.dy) return a.dy < b.dy ? a : b;
+          return a.dx < b.dx ? a : b;
+      }
+  };
 }
 
 inline void gpuErrorCheck(cudaError_t error) {

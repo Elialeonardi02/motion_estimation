@@ -1,6 +1,4 @@
 #include "blockMatchingInterface.h"
-#include "fullSearchBM_cpu_naive.h"
-#include "logarithmicSearchBM_cpu_naive.h"
 #include <stdexcept>
 #include <iostream>
 #include <memory>
@@ -11,6 +9,9 @@ std::vector<std::vector<MotionVector>> fullSearchCPUNaiveGray(const ImageGray& c
 std::vector<std::vector<MotionVector>> fullSearchCPUNaiveRGB(const ImageColor& curr, const ImageColor& ref,
                                                               int blockSize, int searchRange);
 
+std::vector<std::vector<MotionVector>> fullSearchCPUOpenMPGray(const ImageGray& curr, const ImageGray& ref,
+                                                              int blockSize, int searchRange, SingleRunMetrics& metrics);
+                                                              
 std::vector<std::vector<MotionVector>> logarithmicSearchCPUNaiveGray(const ImageGray& curr, const ImageGray& ref,
                                                                       int blockSize, int distance, SingleRunMetrics& metrics);
 
@@ -23,6 +24,9 @@ extern std::vector<std::vector<MotionVector>> fullSearchCUDAOptimizedGray(
 
 extern std::vector<std::vector<MotionVector>> fullSearchCUDAUncoalescedOptimizedGray(
     const ImageGray& curr, const ImageGray& ref, int blockSize, int searchRange, SingleRunMetrics& metrics);
+
+extern std::vector<std::vector<MotionVector>> logarithmicSearchCUDAOptimizedGray(
+    const ImageGray& curr, const ImageGray& ref, int blockSize, int searchDistance, SingleRunMetrics& metrics);
 #endif
 
 // BASE CLASSES
@@ -55,7 +59,14 @@ public:
         return fullSearchCPUNaiveRGB(curr, ref, blockSize, searchRange);
     }
 };
-
+class FullSearchBlockMatcherCPUOpenMP : public FullSearchBlockMatcherBase {
+public:
+    std::vector<std::vector<MotionVector>> matchGray(
+        const ImageGray& curr, const ImageGray& ref, int blockSize, SingleRunMetrics& metrics) override {
+        // Chiama la funzione corretta che abbiamo implementato
+        return fullSearchCPUOpenMPGray(curr, ref, blockSize, searchRange, metrics);
+    }
+};
 // FULL SEARCH - CUDA IMPLEMENTATIONS 
 #ifndef NO_CUDA
 
@@ -83,6 +94,26 @@ public:
     }
 };
 
+class LogarithmicSearchBlockMatcherCUDAOptimized : public BlockMatcher {
+private:
+    int distance = 32;
+    
+public:
+    std::vector<std::vector<MotionVector>> matchGray(
+        const ImageGray& curr, const ImageGray& ref, int blockSize, SingleRunMetrics& metrics) override {
+        return logarithmicSearchCUDAOptimizedGray(curr, ref, blockSize, distance, metrics);
+    }
+    
+    std::vector<std::vector<MotionVector>> matchRGB(
+        const ImageColor&, const ImageColor&, int) override {
+        throw std::runtime_error("Logarithmic search RGB implementation not available");
+    }
+    
+    void setDistance(int d) override {
+        distance = d;
+    }
+};
+
 #else
 
 // Stub implementations when CUDA is not available
@@ -106,6 +137,19 @@ class FullSearchBlockMatcherCUDAUncoalescedOptimized : public FullSearchBlockMat
 public:
     std::vector<std::vector<MotionVector>> matchGray(
         const ImageGray&, const ImageGray&, int, SingleRunMetrics&) override {
+        throw std::runtime_error("CUDA support is not available. Compile with CUDA support enabled.");
+    }
+};
+
+class LogarithmicSearchBlockMatcherCUDAOptimized : public BlockMatcher {
+public:
+    std::vector<std::vector<MotionVector>> matchGray(
+        const ImageGray&, const ImageGray&, int, SingleRunMetrics&) override {
+        throw std::runtime_error("CUDA support is not available. Compile with CUDA support enabled.");
+    }
+
+    std::vector<std::vector<MotionVector>> matchRGB(
+        const ImageColor&, const ImageColor&, int) override {
         throw std::runtime_error("CUDA support is not available. Compile with CUDA support enabled.");
     }
 };
@@ -139,14 +183,16 @@ std::unique_ptr<BlockMatcher> createBlockMatcher(
     const std::string& algorithm, 
     const std::string& implementation) {
     
-    if (algorithm == "full_search") {
+    if (algorithm == "full_search" || algorithm == "range_search") {
         if (implementation == "cpu_naive") {
             return std::make_unique<FullSearchBlockMatcherCPUNaive>();
+        } else if (implementation == "cpu_openmp") { 
+            return std::make_unique<FullSearchBlockMatcherCPUOpenMP>();
         } else if (implementation == "cuda_naive") {
             return std::make_unique<FullSearchBlockMatcherCUDANaive>();
         } else if (implementation == "cuda_optimized") {
             return std::make_unique<FullSearchBlockMatcherCUDAOptimized>();
-        } else if (implementation == "cuda_uncoalesced_optimized") {
+        } else if (implementation == "cuda_optimized_uncoalesced") {
             return std::make_unique<FullSearchBlockMatcherCUDAUncoalescedOptimized>();
         } else {
             throw std::runtime_error("Unknown implementation '" + implementation + 
@@ -155,6 +201,8 @@ std::unique_ptr<BlockMatcher> createBlockMatcher(
     } else if (algorithm == "logarithmic_search") {
         if (implementation == "cpu_naive") {
             return std::make_unique<LogarithmicSearchBlockMatcherCPUNaive>();
+        } else if (implementation == "cuda_optimized") {
+            return std::make_unique<LogarithmicSearchBlockMatcherCUDAOptimized>();
         } else {
             throw std::runtime_error("Unknown implementation '" + implementation + 
                                    "' for algorithm '" + algorithm + "'");

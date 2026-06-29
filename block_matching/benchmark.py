@@ -1,10 +1,11 @@
 import os
 import sys
 import subprocess
-import glob
-import time
+import argparse
+import itertools
 from pathlib import Path
 import csv 
+
 CUDA_BIN = "/usr/local/cuda-12.3/bin"
 CUDA_LIB = "/usr/local/cuda-12.3/lib64"
 SLURM_PARTITION = "gpu-excl"
@@ -12,7 +13,7 @@ NODE_NAME = "node09"
 
 def run_command(cmd, description="", use_srun=False, exclusive=False):
     """run a command on node 09 using srun if use_srun is True, otherwise run locally."""
-    print(f"\n{'='*70}")
+    print(f"\n{'-'*70}")
     if description:
         print(f"  {description}")
     
@@ -21,35 +22,31 @@ def run_command(cmd, description="", use_srun=False, exclusive=False):
         if exclusive:
             final_cmd.append("--exclusive")
             
-        # Accodiamo la lista degli argomenti del C++ in modo sicuro
         final_cmd.extend(cmd)
     else:
         final_cmd = cmd
 
     print(f"  Comando: {' '.join(final_cmd)}")
-    print(f"{'='*70}")
     
-    # 2. Iniezione dell'ambiente CUDA nativa in Python
     custom_env = os.environ.copy()
     custom_env["PATH"] = f"{CUDA_BIN}:{custom_env.get('PATH', '')}"
     custom_env["LD_LIBRARY_PATH"] = f"{CUDA_LIB}:{custom_env.get('LD_LIBRARY_PATH', '')}"
 
-    # 3. Esecuzione con cattura dei risultati e timeout
     try:
         result = subprocess.run(
             final_cmd,
-            env=custom_env,        # Passiamo l'ambiente modificato a Slurm!
+            env=custom_env,
             capture_output=True,
             text=True,
-            timeout=1800           # Timeout di 30 minuti
+            timeout=1800
         )
         return result.stdout, result.stderr, result.returncode
         
     except subprocess.TimeoutExpired:
-        print("ERRORE: Timeout del comando (superati i 30 minuti)")
+        print("ERROR: timeout expired")
         return "", "TIMEOUT", -1
     except Exception as e:
-        print(f"ERRORE: Impossibile avviare il processo: {e}")
+        print(f"ERROR: Failed to run command: {e}")
         return "", str(e), -1
 
 def find_frame_pairs(test_dir, use_srun=False):
@@ -57,21 +54,18 @@ def find_frame_pairs(test_dir, use_srun=False):
     frame_pairs = []
     
     if use_srun:
-        # Use srun to list directories on node09
         cmd = f"ls -1 {test_dir}"
         final_cmd = ["srun", "-p", SLURM_PARTITION, f"--nodelist={NODE_NAME}", "bash", "-c", cmd]
         try:
             result = subprocess.run(final_cmd, capture_output=True, text=True, timeout=30)
             if result.returncode != 0:
                 print(f"ERROR: Could not list directory {test_dir}")
-                print(f"STDERR: {result.stderr}")
                 return []
             subdirs = [d.strip() for d in result.stdout.split('\n') if d.strip()]
         except Exception as e:
             print(f"ERROR: {e}")
             return []
     else:
-        # Use local filesystem
         if not os.path.isdir(test_dir):
             return []
         subdirs = os.listdir(test_dir)
@@ -82,13 +76,11 @@ def find_frame_pairs(test_dir, use_srun=False):
         frame2 = os.path.join(subdir_path, "frame_0002.pgm")
         
         if use_srun:
-            # Verify files exist using srun
             cmd = f"test -f {frame1} && test -f {frame2}"
             final_cmd = ["srun", "-p", SLURM_PARTITION, f"--nodelist={NODE_NAME}", "bash", "-c", cmd]
             result = subprocess.run(final_cmd, capture_output=True, text=True, timeout=10)
             files_exist = result.returncode == 0
         else:
-            # Use local filesystem check
             files_exist = os.path.exists(frame1) and os.path.exists(frame2)
         
         if files_exist:
@@ -100,13 +92,14 @@ def find_frame_pairs(test_dir, use_srun=False):
             })
     
     return frame_pairs
+
 def extract_execution_time(output):
     """Extract execution time from command output."""
     metrics = {
         'total_ms': 0.0,
         'k1_ms': 0.0,
         'k2_ms': 0.0,
-        'found': False # Indicates if we successfully found the timing info
+        'found': False
     }
     
     for line in output.split('\n'):
@@ -129,12 +122,9 @@ def extract_execution_time(output):
             pass
             
     return metrics
-import csv
 
 def save_results_to_csv(results, filename="benchmark_results.csv"):
-    """Save benchmark test results to a CSV file on the cluster."""
-
-    # Define the columns to export based on the metrics structure
+    """Save benchmark test results to a CSV file."""
     fieldnames = [
         'name', 'avg_total_time', 'min_total_time', 'max_total_time', 'MQE_total_time',
         'avg_k1_time', 'min_k1_time', 'max_k1_time', 'MQE_k1_time',
@@ -146,175 +136,201 @@ def save_results_to_csv(results, filename="benchmark_results.csv"):
             writer = csv.DictWriter(file, fieldnames=fieldnames)
             writer.writeheader()
             for r in results:
-                # Extract only the required fields by filtering the dictionary
                 filtered_row = {k: r[k] for k in fieldnames if k in r}
                 writer.writerow(filtered_row)
-        print(f"\n Data successfully saved on the cluster to: {filename}")
+        print(f"  [+] Data successfully saved to: {filename}")
     except Exception as e:
-        print(f"ERROR: Failed to write CSV file: {e}")
-def main():
-    print("Usage: python3 run_tests.py <algorithm> <implementation> <test_dir> [block_size] <warmup_runs> <run_runs>")
-    algorithm = sys.argv[1]
-    implementation = sys.argv[2]
-    test_dir = sys.argv[3]
-    block_size = sys.argv[4] if len(sys.argv) > 4 else "32"
-    warmup_runs = int(sys.argv[5]) if len(sys.argv) > 5 else 0
-    run_runs = int(sys.argv[6]) if len(sys.argv) > 6 else 1
+        print(f"  [-] ERROR: Failed to write CSV file: {e}")
 
-    # detect test_dir on the node09
-    use_srun = "/scratch/" in test_dir or test_dir.startswith("/scratch")
-    # find all frame pairs in the test_dir, each pair have is own subdirectory, and each subdirectory 
-    frame_pairs = find_frame_pairs(test_dir, use_srun=use_srun)
+def main():
+    parser = argparse.ArgumentParser(description="Grid Search Benchmark for Block Matching")
+    
+    parser.add_argument("--algorithms", type=str, required=True, help="Comma-separated list (e.g., full_search,range_search)")
+    parser.add_argument("--implementations", type=str, required=True, help="Comma-separated list (e.g., cuda,cpu)")
+    parser.add_argument("--test_dir", type=str, required=True, help="Path to the test directory")
+    parser.add_argument("--block_sizes", type=str, default="32", help="Comma-separated list (e.g., 16,32,64)")
+    parser.add_argument("--ranges", type=str, default="-1", help="Comma-separated list (e.g., -1,8,16)")
+    parser.add_argument("--distances", type=str, default="-1", help="Comma-separated list (e.g., -1,4,8)")
+    
+    parser.add_argument("--warmup_runs", type=int, default=0, help="Number of warmup runs per test")
+    parser.add_argument("--run_runs", type=int, default=1, help="Number of actual benchmark runs per test")
+    
+    args = parser.parse_args()
+
+    algorithms = [x.strip() for x in args.algorithms.split(',')]
+    implementations = [x.strip() for x in args.implementations.split(',')]
+    block_sizes = [x.strip() for x in args.block_sizes.split(',')]
+    ranges = [x.strip() for x in args.ranges.split(',')]
+    distances = [x.strip() for x in args.distances.split(',')]
+    
+    combinations = list(itertools.product(algorithms, implementations, block_sizes, ranges, distances))
+
+    use_srun = "/scratch/" in args.test_dir or args.test_dir.startswith("/scratch")
+    frame_pairs = find_frame_pairs(args.test_dir, use_srun=use_srun)
 
     print("\n" + "="*70)
-    print("FULL SEARCH TEST RUNNER")
+    print("GRID SEARCH TEST RUNNER")
     print("="*70)
-    print(f"Algorithm:      {algorithm}")
-    print(f"Implementation: {implementation}")
-    print(f"Block size:     {block_size}")
-    print(f"Test directory: {test_dir}")
-    print(f"Execution mode: {NODE_NAME if use_srun else 'Local'}")
+    print(f"Algorithms:      {', '.join(algorithms)}")
+    print(f"Implementations: {', '.join(implementations)}")
+    print(f"Block sizes:     {', '.join(block_sizes)}")
+    print(f"Ranges:          {', '.join(ranges)}")
+    print(f"Distances:       {', '.join(distances)}")
+    print(f"Test directory:  {args.test_dir}")
+    print(f"Execution mode:  {NODE_NAME if use_srun else 'Local'}")
     print(f"Found {len(frame_pairs)} test case(s)")
+    print(f"Total Combinations to test: {len(combinations)}")
     print("="*70)
 
-    print("\n[1/3] Running: make clean")
+    print("\n[1/2] Running: make clean")
     stdout, stderr, rc = run_command(["make", "clean"], "Clean build", use_srun=use_srun)
-    if rc != 0:
-        print(f"Warning: make clean returned code {rc}")
-
-    print("\n[2/3] Running: make")
+    
+    print("\n[2/2] Running: make")
     stdout, stderr, rc = run_command(["make"], "Build project", use_srun=use_srun)
     if rc != 0:
         print(f"ERROR: Build failed!")
-        print("STDOUT:", stdout)
         print("STDERR:", stderr)
         sys.exit(1)
 
-    # Run tests
-    print(f"\n[3/3] Running {len(frame_pairs)} test case(s)")
+    print(f"\nAvvio dei {len(combinations)} test di combinazione...")
     
-    results = []
+    for combo_idx, (algo, impl, bs, rng, dist) in enumerate(combinations, 1):
+        print("\n" + "#"*70)
+        print(f"COMBINAZIONE {combo_idx}/{len(combinations)}")
+        print(f"Config: Algo={algo} | Impl={impl} | BS={bs} | Range={rng} | Dist={dist}")
+        print("#"*70)
+        
+        results = []
+        combo_success_count = 0
+        
+        for i, pair in enumerate(frame_pairs, 1):
+            test_name = pair['name']
+            frame1 = pair['frame1']
+            frame2 = pair['frame2']
+            
+            print(f"\n  [Test {i}/{len(frame_pairs)}] {test_name}")
+            
+            cmd = [
+                "./block_matching",
+                "--algorithm", algo,
+                "--implementation", impl,
+                frame1,
+                frame2,
+                "--block_size", bs
+            ]
+            
+            if rng != "-1" or algo == "range_search":
+                cmd.extend(["--range", rng])
+            if dist != "-1" or algo == "logarithmic":
+                cmd.extend(["--searchDistance", dist])
 
-    for i, pair in enumerate(frame_pairs, 1):
-        test_name = pair['name']
-        frame1 = pair['frame1']
-        frame2 = pair['frame2']
-        
-        print(f"\n[Test {i}/{len(frame_pairs)}] {test_name}")
-        
-        cmd = [
-            "./block_matching",
-            "--algorithm", algorithm,
-            "--implementation", implementation,
-            frame1,
-            frame2,
-            "--block_size", block_size
-        ]
-        temp_results = {
-            'name': test_name,
-            'max_total_time': 0,
-            'min_total_time': float('inf'),
-            'avg_total_time': 0,
-            'MQE_total_time': 0,
-            'k1_time': 0,
-            'max_k1_time': 0,
-            'min_k1_time': float('inf'),
-            'avg_k1_time': 0,
-            'MQE_k1_time': 0,
-            'k2_time': 0,
-            'max_k2_time': 0,
-            'min_k2_time': float('inf'),
-            'avg_k2_time': 0,
-            'MQE_k2_time': 0    
-        }
-        for i in range(warmup_runs):
-            print(f"  Warmup run {i+1}/{warmup_runs}...")
-            stdout, stderr, rc = run_command(cmd, f"Testing {test_name}", use_srun=use_srun, exclusive=use_srun)
-        
-        for i in range(run_runs):
-            print(f"  Run {i+1}/{run_runs}...")
-            stdout, stderr, rc = run_command(cmd, f"Testing {test_name}", use_srun=use_srun, exclusive=use_srun)
-            if rc != 0:
-                print(f"ERROR: Test failed with return code {rc}")
-            else:
-                time_info = extract_execution_time(stdout)
-                temp_results['avg_total_time'] += time_info['total_ms']
-                if temp_results['max_total_time'] < time_info['total_ms']:
-                    temp_results['max_total_time'] = time_info['total_ms']
-                if temp_results['min_total_time'] > time_info['total_ms']:
-                    temp_results['min_total_time'] = time_info['total_ms']
-                if time_info['k1_ms'] > 0:
-                    temp_results['k1_time'] = time_info['k1_ms']
-                    temp_results['avg_k1_time'] += time_info['k1_ms']
-                    if temp_results['max_k1_time'] < time_info['k1_ms']:
-                        temp_results['max_k1_time'] = time_info['k1_ms']
-                    if temp_results['min_k1_time'] > time_info['k1_ms']:
-                        temp_results['min_k1_time'] = time_info['k1_ms']
-                if time_info['k2_ms'] > 0:
-                    temp_results['k2_time'] = time_info['k2_ms']
-                    temp_results['avg_k2_time'] += time_info['k2_ms']
-                    if temp_results['max_k2_time'] < time_info['k2_ms']:
-                        temp_results['max_k2_time'] = time_info['k2_ms']
-                    if temp_results['min_k2_time'] > time_info['k2_ms']:
-                        temp_results['min_k2_time'] = time_info['k2_ms']
+            temp_results = {
+                'name': test_name,
+                'max_total_time': 0, 'min_total_time': float('inf'), 'avg_total_time': 0, 'MQE_total_time': 0,
+                'k1_time': 0, 'max_k1_time': 0, 'min_k1_time': float('inf'), 'avg_k1_time': 0, 'MQE_k1_time': 0,
+                'k2_time': 0, 'max_k2_time': 0, 'min_k2_time': float('inf'), 'avg_k2_time': 0, 'MQE_k2_time': 0   
+            }
+            
+            # Variabile flag per capire se il test corrente è fallito in uno qualsiasi dei run
+            test_failed = False
+            
+            for run_i in range(args.warmup_runs):
+                _, stderr, rc = run_command(cmd, f"Warmup run {run_i+1}/{args.warmup_runs}...", use_srun=use_srun, exclusive=use_srun)
+                if rc != 0:
+                    print(f"  [-] ERROR: Warmup failed (Return Code: {rc})")
+                    print(f"      STDERR: {stderr.strip()}")
+                    test_failed = True
+                    break # out from warmup runs
+            
+            if test_failed:
+                print(f"  [!] Salto '{test_name}' a causa di errore nel Warmup. Nessun record per questo test nel CSV.")
+                continue # go to next test case
+            
+            for run_i in range(args.run_runs):
+                stdout, stderr, rc = run_command(cmd, f"Benchmark run {run_i+1}/{args.run_runs}...", use_srun=use_srun, exclusive=use_srun)
+                
+                if rc != 0:
+                    print(f"  [-] ERROR: Test failed (Return Code: {rc})")
+                    print(f"      STDERR: {stderr.strip()}")
+                    test_failed = True
+                    break # out from benchmark runs
+                else:
+                    time_info = extract_execution_time(stdout)
+                    
+                    if not time_info['found']:
+                        print(f"  [-] ERROR: Nessun tempo trovato nell'output! (Possibile crash silenzioso)")
+                        print(f"      STDOUT: {stdout.strip()}")
+                        test_failed = True
+                        break # out from benchmark runs
 
-                ##print(f" SUCCESS - Elapsed: {elapsed:.2f}s")
-                print(f"  {time_info}")
-        temp_results['avg_total_time'] /= run_runs
-        temp_results['avg_k1_time'] /= run_runs
-        temp_results['avg_k2_time'] /= run_runs
-        if run_runs > 1:
-            temp_results['MQE_total_time'] = (temp_results['avg_total_time'] - temp_results['min_total_time']) / (temp_results['max_total_time'] - temp_results['min_total_time']) if temp_results['max_total_time'] != temp_results['min_total_time'] else 1.0
-            if temp_results['k1_time'] > 0:
-                temp_results['MQE_k1_time'] = (temp_results['avg_k1_time'] - temp_results['min_k1_time']) / (temp_results['max_k1_time'] - temp_results['min_k1_time']) if temp_results['max_k1_time'] != temp_results['min_k1_time'] else 1.0
-            if temp_results['k2_time'] > 0:
-                temp_results['MQE_k2_time'] = (temp_results['avg_k2_time'] - temp_results['min_k2_time']) / (temp_results['max_k2_time'] - temp_results['min_k2_time']) if temp_results['max_k2_time'] != temp_results['min_k2_time'] else 1.0 
-        results.append(temp_results)
-# Print summary
+                    # update the temp_results with the new time_info
+                    temp_results['avg_total_time'] += time_info['total_ms']
+                    temp_results['max_total_time'] = max(temp_results['max_total_time'], time_info['total_ms'])
+                    temp_results['min_total_time'] = min(temp_results['min_total_time'], time_info['total_ms'])
+                    
+                    if time_info['k1_ms'] > 0:
+                        temp_results['k1_time'] = time_info['k1_ms']
+                        temp_results['avg_k1_time'] += time_info['k1_ms']
+                        temp_results['max_k1_time'] = max(temp_results['max_k1_time'], time_info['k1_ms'])
+                        temp_results['min_k1_time'] = min(temp_results['min_k1_time'], time_info['k1_ms'])
+                        
+                    if time_info['k2_ms'] > 0:
+                        temp_results['k2_time'] = time_info['k2_ms']
+                        temp_results['avg_k2_time'] += time_info['k2_ms']
+                        temp_results['max_k2_time'] = max(temp_results['max_k2_time'], time_info['k2_ms'])
+                        temp_results['min_k2_time'] = min(temp_results['min_k2_time'], time_info['k2_ms'])
+
+                    print(f"    -> {time_info}")
+                    
+            if test_failed:
+                print(f"  [!] Salto '{test_name}' a causa di un errore di esecuzione. Nessun record per questo test nel CSV.")
+                continue # out from this test case, go to next test case
+                
+            if args.run_runs > 0:
+                temp_results['avg_total_time'] /= args.run_runs
+                temp_results['avg_k1_time'] /= args.run_runs
+                temp_results['avg_k2_time'] /= args.run_runs
+                
+                if args.run_runs > 1:
+                    if temp_results['max_total_time'] != temp_results['min_total_time']:
+                        temp_results['MQE_total_time'] = (temp_results['avg_total_time'] - temp_results['min_total_time']) / (temp_results['max_total_time'] - temp_results['min_total_time'])
+                    else:
+                        temp_results['MQE_total_time'] = 1.0
+                        
+                    if temp_results['k1_time'] > 0 and temp_results['max_k1_time'] != temp_results['min_k1_time']:
+                        temp_results['MQE_k1_time'] = (temp_results['avg_k1_time'] - temp_results['min_k1_time']) / (temp_results['max_k1_time'] - temp_results['min_k1_time'])
+                    else:
+                        temp_results['MQE_k1_time'] = 1.0
+                        
+                    if temp_results['k2_time'] > 0 and temp_results['max_k2_time'] != temp_results['min_k2_time']:
+                        temp_results['MQE_k2_time'] = (temp_results['avg_k2_time'] - temp_results['min_k2_time']) / (temp_results['max_k2_time'] - temp_results['min_k2_time'])
+                    else:
+                        temp_results['MQE_k2_time'] = 1.0
+            
+            # Append the results for this test case to the overall results list
+            results.append(temp_results)
+            combo_success_count += 1
+
+        # save results to CSV if at least one test was successful
+        if combo_success_count > 0:
+            save_dir = os.path.join("benchmark", algo, impl)
+            
+            if algo == "range_search" and rng != "-1":
+                save_dir = os.path.join(save_dir, f"range_{rng}")
+            elif algo == "logarithmic" and dist != "-1":
+                save_dir = os.path.join(save_dir, f"distance_{dist}")
+                
+            os.makedirs(save_dir, exist_ok=True)
+            
+            csv_filename = os.path.join(save_dir, f"results_{algo}_{impl}_bs{bs}_r{rng}_d{dist}.csv")
+            save_results_to_csv(results, filename=csv_filename)
+        else:
+            print(f"\n  [-] Nessun test completato con successo per questa configurazione (Algo={algo}, Impl={impl}). File CSV NON creato.")
+
     print("\n" + "="*70)
-    print("TEST SUMMARY")
+    print("TUTTE LE COMBINAZIONI ELABORATE")
     print("="*70)
-    print(f"{'Test Name':<40} {'Status':<10} {'Time (s)':<12}")
-    print("-"*70)
-    
-    total_time = 0
-    success_count = 0
-    
-    # Detailed results
-    print("\nDETAILED RESULTS:")
-    print("="*70)
-    
-    
-    for result in results:
-        status = "SUCCESS" if result['avg_total_time'] > 0 else "FAILED"
-        print(f"{result['name']:<40} {status:<10} {result['avg_total_time']:.2f}")
-        if status == "SUCCESS":
-            success_count += 1
-            total_time += result['avg_total_time']
-        print(f"Test: {result['name']}")
-        print(f"  Total Time: {result['avg_total_time']:.2f}s (Min: {result['min_total_time']:.2f}s, Max: {result['max_total_time']:.2f}s, MQE: {result['MQE_total_time']:.2f})")
-        if result['k1_time'] > 0:
-            print(f"  GPU Kernel 1 Time: {result['avg_k1_time']:.2f}ms (Min: {result['min_k1_time']:.2f}ms, Max: {result['max_k1_time']:.2f}ms, MQE: {result['MQE_k1_time']:.2f})")
-        if result['k2_time'] > 0:
-            print(f"  GPU Kernel 2 Time: {result['avg_k2_time']:.2f}ms (Min: {result['min_k2_time']:.2f}ms, Max: {result['max_k2_time']:.2f}ms, MQE: {result['MQE_k2_time']:.2f})")
-    print("\n" + "="*70)
-    if success_count == len(results):
-        print(" All tests completed successfully!")
-    else:
-        print(f" {len(results) - success_count} test(s) failed")
-    
-    # Final summary
-    print("\n" + "="*70)
-    print("FINAL SUMMARY")
-    print("="*70)
-    print(f"Input:      {test_dir}")
-    print(f"Version:    {implementation}")
-    print(f"Time:       {total_time:.2f}s")
-    print("="*70)
-    if success_count > 0:
-        csv_filename = f"results_{algorithm}_{implementation}-bs_{block_size}.csv"
-        save_results_to_csv(results, filename=csv_filename)
-    return 0 if success_count == len(results) else 1
+    return 0
 
 if __name__ == "__main__":
-    sys.exit(main())    
+    sys.exit(main())

@@ -9,6 +9,14 @@ struct MotionVector {
     int dy;
 };
 
+// CandidateSad structure, holding SAD value and corresponding motion vector for a candidate block
+struct CandidateSad {
+    int sad;
+    int dx;
+    int dy;
+}; 
+
+
 // Grayscale image structure
 struct ImageGray {
     int width;

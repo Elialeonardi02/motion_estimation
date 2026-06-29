@@ -19,8 +19,9 @@ int main(int argc, char* argv[]) {
     int width = 0, height = 0;
     bool isColor = false;
     int blockSize = 32;
-    int distance = 32;
+    int distance = -1; // <0 meand a distance of max(frame.width, frame.height)
     int searchRange = -1 ; // <0 means full frame search, otherwise limited to range around block position
+    bool print_mv = true; // default to print motion vectors to console
 
     string algorithm = "full_search";
     string implementation = "cpu_naive";
@@ -109,6 +110,8 @@ int main(int argc, char* argv[]) {
                 cerr << "Error: --distance requires a numeric value" << endl;
                 return 1;
             }
+        } else if(arg == "--no_print_mv") {
+            print_mv = false;
         } else {
             image_paths.push_back(arg);
         }
@@ -133,11 +136,13 @@ int main(int argc, char* argv[]) {
              << " [--input_dir <dir>] [--input_range <prefix> <suffix> <start> <end>]"
              << " [--format pgm|ppm|raw] [--width W] [--height H] [--color]"
              << " [--block_size <size>] [--distance <dist>] [--range <search_range>]"
-             << " <image1> <image2> ..." << endl;
+             << " <image1> <image2> ..." 
+             << "--no_print_mv" << endl;
+
         cerr << "At least two images are required for motion estimation." << endl;
         cerr << "For RAW format, specify --width and --height. Use --color to specify RGB images (default is grayscale)." << endl;
-        cerr << "Available algorithms: full_search, logarithmic_search" << endl;
-        cerr << "Available implementations: cpu_naive, cuda_naive, cuda_optimized, cuda_uncoalesced_optimized" << endl;
+        cerr << "Available algorithms: full_search, range_search, logarithmic_search" << endl;
+        cerr << "Available implementations: cpu_naive, cpu_openmp, cuda_naive, cuda_optimized, cuda_uncoalesced_optimized" << endl;
         cerr << "Default block size: 32 (full frame search)" << endl;
         cerr << "Default search distance: 32 (used only for logarithmic_search)" << endl;
         cerr << "Default search mode: full search" << endl;
@@ -184,7 +189,7 @@ int main(int argc, char* argv[]) {
     if(algorithm == "logarithmic_search") {
         cout << "  Search distance: " << distance << endl;
     }
-    if(searchRange > 0) {
+    if(searchRange > 0 && algorithm == "range_search") {
         cout << "  Search mode: Range search (range=" << searchRange << " blocks)" << endl;
     } else {
         cout << "  Search mode: Full frame search" << endl;
@@ -194,13 +199,13 @@ int main(int argc, char* argv[]) {
     unique_ptr<BlockMatcher> matcher;
     try {
         matcher = createBlockMatcher(algorithm, implementation);
+        matcher->setDistance(distance);
+        matcher->setSearchRange(searchRange);
     } catch(const exception& e) {
         cerr << "Error creating block matcher: " << e.what() << endl;
         return 1;
     }
     
-    matcher->setDistance(distance);
-    matcher->setSearchRange(searchRange);
 
     bool isRange = !range_prefix.empty();
 
@@ -222,7 +227,7 @@ int main(int argc, char* argv[]) {
                 } else {
                     throw runtime_error("For RGB images, use 'ppm' or 'raw' format");
                 }
-                
+
                 chrono::high_resolution_clock::time_point start = chrono::high_resolution_clock::now();
                 vector<vector<MotionVector>> mv = matcher->matchRGB(curr_frame, ref_frame, blockSize);
                 chrono::high_resolution_clock::time_point end = chrono::high_resolution_clock::now();
@@ -237,7 +242,8 @@ int main(int argc, char* argv[]) {
                 // Save frame difference image
                 size_t last_dot = output_path.rfind('.');
                 string diff_path = output_path.substr(0, last_dot) + "_diff.ppm";
-                savePPM(drawFrameDifferenceRGB(ref_frame, curr_frame), diff_path);
+                ImageColor diff_img = drawFrameDifferenceRGB(ref_frame, curr_frame);
+                savePPM(drawFrameWithGridRGB(diff_img, blockSize), diff_path);
                 cout << "Frame difference saved in " << diff_path << endl;
                 
                 // Save reference frame with grid
@@ -249,7 +255,6 @@ int main(int argc, char* argv[]) {
                 string curr_grid_path = output_path.substr(0, last_dot) + "_curr_grid.ppm";
                 savePPM(drawFrameWithGridRGB(curr_frame, blockSize), curr_grid_path);
                 cout << "Current frame with grid saved in " << curr_grid_path << endl;
-
             } else {
                 ImageGray ref_frame, curr_frame;
                 if(format == "pgm") {
@@ -261,13 +266,14 @@ int main(int argc, char* argv[]) {
                 } else {
                     throw runtime_error("Unsupported format: " + format);
                 }
-
                 SingleRunMetrics metrics;
                 vector<vector<MotionVector>> mv = matcher->matchGray(curr_frame, ref_frame, blockSize, metrics);
-                for (size_t i = 0; i < mv.size(); i++) {
-                    for (size_t j = 0; j < mv[i].size(); j++) {
-                        std::cout << "mv[" << i << "][" << j << "] = ("
-                                << mv[i][j].dx << ", " << mv[i][j].dy << ")\n";
+                if (print_mv) {
+                    for (size_t i = 0; i < mv.size(); i++) {
+                        for (size_t j = 0; j < mv[i].size(); j++) {
+                            std::cout << "mv[" << i << "][" << j << "] = ("
+                                    << mv[i][j].dx << ", " << mv[i][j].dy << ")\n";
+                        }
                     }
                 }
                 //chrono::high_resolution_clock::time_point end = chrono::high_resolution_clock::now();
@@ -280,7 +286,8 @@ int main(int argc, char* argv[]) {
                 // Save frame difference image
                 size_t last_dot = output_path.rfind('.');
                 string diff_path = output_path.substr(0, last_dot) + "_diff.ppm";
-                savePPM(drawFrameDifference(ref_frame, curr_frame), diff_path);
+                ImageColor diff_img = drawFrameDifference(ref_frame, curr_frame);
+                savePPM(drawFrameWithGridRGB(diff_img, blockSize), diff_path);
                 cout << "Frame difference saved in " << diff_path << endl;
                 
                 // Save reference frame with grid
@@ -296,7 +303,6 @@ int main(int argc, char* argv[]) {
                 cout << "Total time: " << metrics.total_ms << " ms" << endl;
                 cout << "GPU kernel 1 time: " << metrics.gpu_kernel1_ms << " ms" << endl;
                 cout << "GPU kernel 2 time: " << metrics.gpu_kernel2_ms << " ms" << endl;
-                
             }
         } catch(const exception& e) {
             cerr << "Error during processing: " << e.what() << endl;
